@@ -1,1 +1,9 @@
-Mark_1_DX3D/Mark_1_DX3D.vcxproj
+# Ignore everything by default
+*
+
+# Do not ignore directories, so Git can search them for files
+!*/
+
+# Whitelist .cpp and .h files
+!*.cpp
+!*.h
