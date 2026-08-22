@@ -1,4 +1,5 @@
 #include "SystemClass.h"
+#include "resource.h"
 
 
 SystemClass::SystemClass()
@@ -184,8 +185,8 @@ void SystemClass::InitializeWindows(int& screenWidth, int& screenHeight)
     wc.cbClsExtra    = 0;
     wc.cbWndExtra    = 0;
     wc.hInstance     = m_hinstance;
-    wc.hIcon         = LoadIcon(NULL, IDI_WINLOGO);
-    wc.hIconSm       = wc.hIcon;
+    wc.hIcon         = (HICON)LoadImage(m_hinstance, MAKEINTRESOURCE(IDI_ICON1), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+    wc.hIconSm       = (HICON)LoadImage(m_hinstance, MAKEINTRESOURCE(IDI_ICON1), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
     wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszMenuName  = NULL;

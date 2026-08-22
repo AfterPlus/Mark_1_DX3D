@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <D3dClass.h>
 
 // GLOBALS //
 /////////////
