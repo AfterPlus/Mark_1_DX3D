@@ -3,6 +3,7 @@
 
 SystemClass::SystemClass()
 {
+    m_Input = 0;
     m_Application = 0;
 }
 
@@ -30,6 +31,10 @@ bool SystemClass::Initialize()
     // Initialize the windows api.
     InitializeWindows(screenWidth, screenHeight);
 
+    // Create and initialize the input object. This object will be used to handle reading the keyboard input from the user.
+    m_Input = new InputClass;
+    m_Input->Initialize();
+
     // Create and initialize the application class object. This object will handle rendering all the graphics for this application.
     m_Application = new Application;
 
@@ -51,6 +56,13 @@ void SystemClass::Shutdown()
         m_Application->Shutdown();
         delete m_Application;
         m_Application = 0;
+    }
+
+    // Release the input object.
+    if(m_Input)
+    {
+        delete m_Input;
+        m_Input = 0;
     }
 
     // Shutdown the window.
@@ -101,7 +113,25 @@ void SystemClass::Run()
 
 bool SystemClass::Frame()
 {
-    return m_Application->Frame();
+    
+    bool result;
+
+
+    // Check if the user pressed escape and wants to exit the application.
+    if(m_Input->is_key_down(VK_ESCAPE))
+    {
+        return false;
+    }
+
+    // Do the frame processing for the application class object.
+    result = m_Application->Frame();
+    if(!result)
+    {
+        return false;
+    }
+
+    return true;
+    
 }
 
 // TODO : Learn this topic 

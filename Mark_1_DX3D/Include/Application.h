@@ -9,6 +9,8 @@ const bool VSYNC_ENABLED = true;
 const float SCREEN_DEPTH = 1000.0f;
 const float SCREEN_NEAR = 0.3f;
 
+class InputClass;
+
 class Application
 {
 public:
@@ -19,7 +21,7 @@ public:
     bool Initialize(int screenWidth, int screenHeight, HWND hwnd);
     void Shutdown();
     bool Frame();
-    
+
     private:
-    bool Render(); 
+    bool Render();
 };

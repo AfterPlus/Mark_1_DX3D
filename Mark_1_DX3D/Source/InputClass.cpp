@@ -1,5 +1,20 @@
 ﻿#include "InputClass.h"
 
+InputClass::InputClass()
+{
+}
+
+
+InputClass::InputClass(const InputClass& other)
+{
+}
+
+
+InputClass::~InputClass()
+{
+}
+
+
 void InputClass::Initialize()
 {
     int i ;
