@@ -22,7 +22,12 @@ public:
     bool Initialize(int screenWidth, int screenHeight, HWND hwnd);
     void Shutdown();
     bool Frame();
+    
+    POINT MousePosition(float x, float y);
 
-    private:
+private:
+    
     bool Render();
+    
+    D3dClass* m_Direct3D;
 };
