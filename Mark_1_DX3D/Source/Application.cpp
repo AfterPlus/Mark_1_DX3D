@@ -168,8 +168,14 @@ bool Application::ReadMouse()
 
 bool Application::Render()
 {
-    // Clear the buffers to begin the scene.
-    m_Direct3D->BeginScene(1.0f, 0.5f, 0.5f, 1.0f);
+    float red, blue;
+
+    // Normalize the mouse position into the [0, 1] range the clear color expects.
+    red = static_cast<float>(m_mousePosition.x) / static_cast<float>(m_screenWidth);
+    blue = static_cast<float>(m_mousePosition.y) / static_cast<float>(m_screenHeight);
+
+    // Clear the buffers to begin the scene, colored by the current mouse position.
+    m_Direct3D->BeginScene(red, 0.0f, blue, 1.0f);
 
 
     // Present the rendered scene to the screen.
