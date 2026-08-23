@@ -1,6 +1,12 @@
 #pragma once
 
+#define DIRECTINPUT_VERSION 0x0800
+
+#pragma comment(lib, "dinput8.lib")
+#pragma comment(lib, "dxguid.lib")
+
 #include <windows.h>
+#include <dinput.h>
 #include <D3dClass.h>
 
 // GLOBALS //
@@ -22,12 +28,20 @@ public:
     bool Initialize(int screenWidth, int screenHeight, HWND hwnd);
     void Shutdown();
     bool Frame();
-    
-    POINT MousePosition(float x, float y);
+
+    POINT MousePosition();
 
 private:
-    
+
     bool Render();
-    
+    bool ReadMouse();
+
     D3dClass* m_Direct3D;
+
+    IDirectInput8* m_directInput;
+    IDirectInputDevice8* m_mouse;
+    DIMOUSESTATE m_mouseState;
+    int m_screenWidth, m_screenHeight;
+    LONG m_mouseX, m_mouseY;
+    POINT m_mousePosition;
 };
