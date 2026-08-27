@@ -74,15 +74,19 @@ bool ModelClass::InitializeBuffers(ID3D11Device* device)
 		return false;
 	}
 
+	XMFLOAT4 colorRed(1.0f, 0.0f, 0.0f, 1.0f);
+	XMFLOAT4 colorGreen(0.0f, 1.0f, 0.0f, 1.0f);
+	XMFLOAT4 colorBlue(0.0f, 0.0f, 1.0f, 1.0f);
+	
 	// Load the vertex array with data.
-	vertices[0].position = XMFLOAT3(-1.0f, -1.0f, 0.0f);  // Bottom left.
-	vertices[0].color = XMFLOAT3(0.0f, 1.0f, 0.0f);
+	vertices[0].position = XMFLOAT4(-1.0f, -1.0f, 0.0f,1.0f);  // Bottom left.
+	vertices[0].color = colorRed;
 
-	vertices[1].position = XMFLOAT3(0.0f, 1.0f, 0.0f);  // Top middle.
-	vertices[1].color = XMFLOAT3(0.0f, 1.0f, 0.0f);
+	vertices[1].position = XMFLOAT4(0.0f, 1.0f, 0.0f,1.0f);  // Top middle.
+	vertices[1].color = colorGreen;
 
-	vertices[2].position = XMFLOAT3(1.0f, -1.0f, 0.0f);  // Bottom right.
-	vertices[2].color = XMFLOAT3(0.0f, 1.0f, 0.0f);
+	vertices[2].position = XMFLOAT4(1.0f, -1.0f, 0.0f,1.0f);  // Bottom right.
+	vertices[2].color = colorBlue;
 
 	// Load the index array with data.
 	indices[0] = 0;  // Bottom left.

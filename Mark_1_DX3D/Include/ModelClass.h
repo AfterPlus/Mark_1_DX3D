@@ -12,8 +12,8 @@ class ModelClass
 private:
     struct VertexType
     {
-        XMFLOAT3 position;
-        XMFLOAT3 color;
+        XMFLOAT4 position;
+        XMFLOAT4 color;
     };
     
 public:

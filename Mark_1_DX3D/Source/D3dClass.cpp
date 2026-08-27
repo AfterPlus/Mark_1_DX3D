@@ -445,8 +445,7 @@ ID3D11Device* D3dClass::GetDevice()
 
 ID3D11DeviceContext* D3dClass::GetDeviceContext()
 {
-    //projectionMatrix = m_projectionMatrix;
-    return nullptr;
+    return m_deviceContext;
 }
 
 void D3dClass::GetProjectionMatrix(XMMATRIX& projectionMatrix)

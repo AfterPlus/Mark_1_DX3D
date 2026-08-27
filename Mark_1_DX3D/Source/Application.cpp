@@ -68,7 +68,6 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     
 }
 
-
 void Application::Shutdown()
 {
     // Release the DirectInput mouse device.

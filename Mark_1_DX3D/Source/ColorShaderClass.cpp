@@ -29,14 +29,14 @@ bool ColorShaderClass::Initialize(ID3D11Device* device, HWND hwnd)
 
 
     // Set the filename of the vertex shader.
-    error = wcscpy_s(vsFilename, 128, L"../Engine/colorVS.HLSL");
+    error = wcscpy_s(vsFilename, 128, L"_Shader/colorVS.HLSL");
     if(error != 0)
     {
         return false;
     }
 
     // Set the filename of the pixel shader.
-    error = wcscpy_s(psFilename, 128, L"../Engine/colorPS.HLSL");
+    error = wcscpy_s(psFilename, 128, L"_Shader/colorPS.HLSL");
     if(error != 0)
     {
         return false;
@@ -151,10 +151,10 @@ bool ColorShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WCHAR* 
     }
     
     // Create the vertex input layout description.
-    // This setup needs to match the VertexType stucture in the ModelClass and in the shader.
+    // This setup needs to match the VertexType structure in the ModelClass and in the shader.
     polygonLayout[0].SemanticName = "POSITION";
     polygonLayout[0].SemanticIndex = 0;
-    polygonLayout[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+    polygonLayout[0].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     polygonLayout[0].InputSlot = 0;
     polygonLayout[0].AlignedByteOffset = 0;
     polygonLayout[0].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
