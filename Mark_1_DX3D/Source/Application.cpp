@@ -7,6 +7,9 @@ Application::Application()
     m_directInput = 0;
     m_mouse = 0;
     m_mousePosition = { 0, 0 };
+    m_Camera = 0;
+    m_Model = 0;
+    m_ColorShader = 0;
 }
 
 
@@ -34,47 +37,35 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         MessageBox(hwnd, L"Could not initialize Direct3D", L"Error", MB_OK);
         return false;
     }
+    
+    // Create the camera object.
+    m_Camera = new CameraClass;
 
-    // Store the screen size and reset the tracked mouse position.
-    m_screenWidth = screenWidth;
-    m_screenHeight = screenHeight;
-    m_mouseX = 0;
-    m_mouseY = 0;
+    // Set the initial position of the camera.
+    m_Camera->SetPosition(0.0f, 0.0f, -5.0f);
 
-    // Initialize the main DirectInput interface.
-    hresult = DirectInput8Create((HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), DIRECTINPUT_VERSION, IID_IDirectInput8, (void**)&m_directInput, NULL);
-    if (FAILED(hresult))
+    // Create and initialize the model object.
+    m_Model = new ModelClass;
+
+    result = m_Model->Initialize(m_Direct3D->GetDevice());
+    if(!result)
     {
-        MessageBox(hwnd, L"Could not initialize DirectInput", L"Error", MB_OK);
+        MessageBox(hwnd, L"Could not initialize the model object.", L"Error", MB_OK);
         return false;
     }
 
-    // Initialize the DirectInput interface for the mouse.
-    hresult = m_directInput->CreateDevice(GUID_SysMouse, &m_mouse, NULL);
-    if (FAILED(hresult))
+    // Create and initialize the color shader object.
+    m_ColorShader = new ColorShaderClass;
+
+    result = m_ColorShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
     {
-        MessageBox(hwnd, L"Could not create the DirectInput mouse device", L"Error", MB_OK);
+        MessageBox(hwnd, L"Could not initialize the color shader object.", L"Error", MB_OK);
         return false;
     }
-
-    // Set the data format for the mouse using the pre-defined mouse data format.
-    hresult = m_mouse->SetDataFormat(&c_dfDIMouse);
-    if (FAILED(hresult))
-    {
-        return false;
-    }
-
-    // Set the cooperative level of the mouse to share with other programs.
-    hresult = m_mouse->SetCooperativeLevel(hwnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE);
-    if (FAILED(hresult))
-    {
-        return false;
-    }
-
-    // Acquire the mouse.
-    m_mouse->Acquire();
 
     return true;
+    
 }
 
 
@@ -88,11 +79,27 @@ void Application::Shutdown()
         m_mouse = nullptr;
     }
 
-    // Release the main DirectInput interface.
-    if (m_directInput)
+    // Release the color shader object.
+    if (m_ColorShader)
     {
-        m_directInput->Release();
-        m_directInput = nullptr;
+        m_ColorShader->Shutdown();
+        delete m_ColorShader;
+        m_ColorShader = 0;
+    }
+
+    // Release the model object.
+    if (m_Model)
+    {
+        m_Model->Shutdown();
+        delete m_Model;
+        m_Model = 0;
+    }
+
+    // Release the camera object.
+    if (m_Camera)
+    {
+        delete m_Camera;
+        m_Camera = 0;
     }
 
     // Release the directX object
@@ -109,16 +116,14 @@ void Application::Shutdown()
 bool Application::Frame()
 {
     bool result;
-
-    // Update the tracked mouse position for this frame.
-    m_mousePosition = MousePosition();
-
-    // Render the graphics scene
+    
+    // Render the graphics scene.
     result = Render();
-    if (!result)
+    if(!result)
     {
         return false;
     }
+
     return true;
 }
 
@@ -168,15 +173,44 @@ bool Application::ReadMouse()
 
 bool Application::Render()
 {
-    float red, blue;
+        //float red, blue;
+    //
+        //// Normalize the mouse position into the [0, 1] range the clear color expects.
+        //red = static_cast<float>(m_mousePosition.x) / static_cast<float>(m_screenWidth);
+        //blue = static_cast<float>(m_mousePosition.y) / static_cast<float>(m_screenHeight);
+    //
+        //// Clear the buffers to begin the scene, colored by the current mouse position.
+        //m_Direct3D->BeginScene(red, 0.0f, blue, 1.0f);
+    //
+    //
+        //// Present the rendered scene to the screen.
+        //m_Direct3D->EndScene();
 
-    // Normalize the mouse position into the [0, 1] range the clear color expects.
-    red = static_cast<float>(m_mousePosition.x) / static_cast<float>(m_screenWidth);
-    blue = static_cast<float>(m_mousePosition.y) / static_cast<float>(m_screenHeight);
+    
+    XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
+    bool result;
 
-    // Clear the buffers to begin the scene, colored by the current mouse position.
-    m_Direct3D->BeginScene(red, 0.0f, blue, 1.0f);
 
+    // Clear the buffers to begin the scene.
+    m_Direct3D->BeginScene(0.0f, 0.0f, 0.0f, 1.0f);
+
+    // Generate the view matrix based on the camera's position.
+    m_Camera->Render();
+
+    // Get the world, view, and projection matrices from the camera and d3d objects.
+    m_Direct3D->GetWorldMatrix(worldMatrix);
+    m_Camera->GetViewMatrix(viewMatrix);
+    m_Direct3D->GetProjectionMatrix(projectionMatrix);
+
+    // Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
+    m_Model->Render(m_Direct3D->GetDeviceContext());
+
+    // Render the model using the color shader.
+    result = m_ColorShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix);
+    if (!result)
+    {
+        return false;
+    }
 
     // Present the rendered scene to the screen.
     m_Direct3D->EndScene();

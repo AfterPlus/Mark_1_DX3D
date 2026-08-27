@@ -8,6 +8,10 @@
 #include <windows.h>
 #include <dinput.h>
 #include <D3dClass.h>
+#include <CameraClass.h>
+#include <ColorShaderClass.h>
+#include <ModelClass.h>
+
 
 // GLOBALS //
 /////////////
@@ -37,6 +41,9 @@ private:
     bool ReadMouse();
 
     D3dClass* m_Direct3D;
+    CameraClass* m_Camera;
+    ModelClass* m_Model;
+    ColorShaderClass* m_ColorShader;
 
     IDirectInput8* m_directInput;
     IDirectInputDevice8* m_mouse;
