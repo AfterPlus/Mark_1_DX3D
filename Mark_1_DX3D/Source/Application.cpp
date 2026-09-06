@@ -49,7 +49,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Model = new ModelClass;
 
     // Set the name of the texture file that we will be loading.
-    strcpy_s(textureFilename, "../Engine/data/stone01.tga");
+    strcpy_s(textureFilename, "../Resource/dx11win10tut61_src/data/stone01.tga");
 
     result = m_Model->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), textureFilename);
     
@@ -215,12 +215,10 @@ bool Application::Render()
     // Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
     m_Model->Render(m_Direct3D->GetDeviceContext());
 
-    // Render the model using the color shader.
-    result = m_ColorShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix);
-    if (!result)
-    {
-        return false;
-    }
+    // NOTE: the color shader no longer draws this model. ModelClass::VertexType now carries a
+    // TEXCOORD instead of a COLOR, so the color shader's input layout does not match the vertex
+    // buffer any more. It also wrote depth first, which made the textured pass below fail the
+    // D3D11_COMPARISON_LESS depth test.
 
     // Render the model using the texture shader.
     result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, m_Model->GetTexture());
