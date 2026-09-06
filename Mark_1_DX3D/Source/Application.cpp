@@ -10,6 +10,7 @@ Application::Application()
     m_Camera = 0;
     m_Model = 0;
     m_ColorShader = 0;
+    m_TextureShader = 0 ;
 }
 
 
@@ -25,7 +26,7 @@ Application::~Application()
 
 bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 {
-    HRESULT hresult;
+    char textureFilename[128];
     bool result;
 
     // Create and initialize new direct X object
@@ -47,7 +48,11 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create and initialize the model object.
     m_Model = new ModelClass;
 
-    result = m_Model->Initialize(m_Direct3D->GetDevice());
+    // Set the name of the texture file that we will be loading.
+    strcpy_s(textureFilename, "../Engine/data/stone01.tga");
+
+    result = m_Model->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), textureFilename);
+    
     if(!result)
     {
         MessageBox(hwnd, L"Could not initialize the model object.", L"Error", MB_OK);
@@ -63,6 +68,16 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         MessageBox(hwnd, L"Could not initialize the color shader object.", L"Error", MB_OK);
         return false;
     }
+    
+    // Create and initialize the texture shader object.
+    m_TextureShader = new TextureShaderClass;
+
+    result = m_TextureShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the texture shader object.", L"Error", MB_OK);
+        return false;
+    }
 
     return true;
     
@@ -70,6 +85,15 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
 void Application::Shutdown()
 {
+    
+    // Release the texture shader object.
+    if (m_TextureShader)
+    {
+        m_TextureShader->Shutdown();
+        delete m_TextureShader;
+        m_TextureShader = 0;
+    }
+    
     // Release the DirectInput mouse device.
     if (m_mouse)
     {
@@ -172,19 +196,6 @@ bool Application::ReadMouse()
 
 bool Application::Render()
 {
-        //float red, blue;
-    //
-        //// Normalize the mouse position into the [0, 1] range the clear color expects.
-        //red = static_cast<float>(m_mousePosition.x) / static_cast<float>(m_screenWidth);
-        //blue = static_cast<float>(m_mousePosition.y) / static_cast<float>(m_screenHeight);
-    //
-        //// Clear the buffers to begin the scene, colored by the current mouse position.
-        //m_Direct3D->BeginScene(red, 0.0f, blue, 1.0f);
-    //
-    //
-        //// Present the rendered scene to the screen.
-        //m_Direct3D->EndScene();
-
     
     XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
     bool result;
@@ -211,6 +222,13 @@ bool Application::Render()
         return false;
     }
 
+    // Render the model using the texture shader.
+    result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, m_Model->GetTexture());
+    if (!result)
+    {
+        return false;
+    }
+    
     // Present the rendered scene to the screen.
     m_Direct3D->EndScene();
 

@@ -11,7 +11,7 @@
 #include <CameraClass.h>
 #include <ColorShaderClass.h>
 #include <ModelClass.h>
-
+#include "textureshaderclass.h"
 
 // GLOBALS //
 /////////////
@@ -44,6 +44,7 @@ private:
     CameraClass* m_Camera;
     ModelClass* m_Model;
     ColorShaderClass* m_ColorShader;
+    TextureShaderClass* m_TextureShader;
 
     IDirectInput8* m_directInput;
     IDirectInputDevice8* m_mouse;
