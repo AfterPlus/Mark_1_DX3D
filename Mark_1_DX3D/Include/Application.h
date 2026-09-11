@@ -12,9 +12,10 @@
 #include <ColorShaderClass.h>
 #include <ModelClass.h>
 #include "textureshaderclass.h"
+#include "LightShaderClass.h"
+#include "LightClass.h"
 
-// GLOBALS //
-/////////////
+// GLOBALS
 const bool VSYNC_ENABLED = true;
 const float SCREEN_DEPTH = 1000.0f;
 const float SCREEN_NEAR = 0.3f;
@@ -37,7 +38,7 @@ public:
 
 private:
 
-    bool Render();
+    bool Render(float);
     bool ReadMouse();
 
     D3dClass* m_Direct3D;
@@ -45,6 +46,8 @@ private:
     ModelClass* m_Model;
     ColorShaderClass* m_ColorShader;
     TextureShaderClass* m_TextureShader;
+    LightShaderClass* m_LightShader;
+    LightClass* m_Light;
 
     IDirectInput8* m_directInput;
     IDirectInputDevice8* m_mouse;

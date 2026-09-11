@@ -3,14 +3,16 @@
 
 Application::Application()
 {
-    m_Direct3D = 0;
-    m_directInput = 0;
-    m_mouse = 0;
+    m_Direct3D = nullptr;
+    m_directInput = nullptr;
+    m_mouse = nullptr;
     m_mousePosition = { 0, 0 };
-    m_Camera = 0;
-    m_Model = 0;
-    m_ColorShader = 0;
-    m_TextureShader = 0 ;
+    m_Camera = nullptr;
+    m_Model = nullptr;
+    m_ColorShader = nullptr;
+    m_TextureShader = nullptr ;
+    m_Light = nullptr;
+    m_LightShader = nullptr;
 }
 
 
@@ -79,12 +81,42 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
+    // Create and initialize the light shader object.
+    m_LightShader = new LightShaderClass;
+
+    result = m_LightShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the light shader object.", L"Error", MB_OK);
+        return false;
+    }
+    
+    // Create and initialize the light object.
+    m_Light = new LightClass;
+
+    m_Light->SetDiffuseColor(10.0f, 0.0f, 0.0f, 1.0f);
+    m_Light->SetDirection(0.0f, 0.0f, 1.0f);
+    
     return true;
     
 }
 
 void Application::Shutdown()
 {
+    // Release the light object.
+    if(m_Light)
+    {
+        delete m_Light;
+        m_Light = 0;
+    }
+
+    // Release the light shader object.
+    if(m_LightShader)
+    {
+        m_LightShader->Shutdown();
+        delete m_LightShader;
+        m_LightShader = nullptr;
+    }
     
     // Release the texture shader object.
     if (m_TextureShader)
@@ -138,10 +170,18 @@ void Application::Shutdown()
 
 bool Application::Frame()
 {
+    static float rotation = 0.0f;
     bool result;
     
+    // Update the rotation variable each frame.
+    rotation -= 0.0174532925f * 0.9f;
+    if(rotation < 0.0f)
+    {
+        rotation += 360.0f;
+    }
+    
     // Render the graphics scene.
-    result = Render();
+    result = Render(rotation);
     if(!result)
     {
         return false;
@@ -204,7 +244,7 @@ bool Application::ReadMouse()
 }
 
 
-bool Application::Render()
+bool Application::Render(float rotation)
 {
     
     XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
@@ -222,17 +262,23 @@ bool Application::Render()
     m_Camera->GetViewMatrix(viewMatrix);
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
 
+    // Rotate the world matrix by the rotation value so that the triangle will spin.
+    worldMatrix = XMMatrixRotationY(rotation);
+    
     // Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
     m_Model->Render(m_Direct3D->GetDeviceContext());
-
-    // NOTE: the color shader no longer draws this model. ModelClass::VertexType now carries a
-    // TEXCOORD instead of a COLOR, so the color shader's input layout does not match the vertex
-    // buffer any more. It also wrote depth first, which made the textured pass below fail the
-    // D3D11_COMPARISON_LESS depth test.
 
     // Render the model using the texture shader.
     result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, m_Model->GetTexture());
     if (!result)
+    {
+        return false;
+    }
+    
+    // Render the model using the light shader.
+    result = m_LightShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, m_Model->GetTexture(),
+                                   m_Light->GetDirection(), m_Light->GetDiffuseColor());
+    if(!result)
     {
         return false;
     }

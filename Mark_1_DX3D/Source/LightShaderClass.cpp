@@ -26,7 +26,7 @@ bool LightShaderClass::Initialize(ID3D11Device* device, HWND hwnd)
     bool result;
     
     // Set the filename of the vertex shader.
-    error = wcscpy_s(vsFilename, 128, L"../Engine/light.vs");
+    error = wcscpy_s(vsFilename, 128, L"_Shader/LightVS.HLSL");
     
     if (error != 0)
     {
@@ -34,7 +34,7 @@ bool LightShaderClass::Initialize(ID3D11Device* device, HWND hwnd)
     }
 
     // Set the filename of the pixel shader.
-    error = wcscpy_s(psFilename, 128, L"../Engine/light.ps");
+    error = wcscpy_s(psFilename, 128, L"_Shader/LightPS.HLSL");
     if (error != 0)
     {
         return false;
@@ -318,7 +318,7 @@ bool LightShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WCHAR* 
     // This setup needs to match the VertexType stucture in the ModelClass and in the shader.
     polygonLayout[0].SemanticName = "POSITION";
     polygonLayout[0].SemanticIndex = 0;
-    polygonLayout[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+    polygonLayout[0].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     polygonLayout[0].InputSlot = 0;
     polygonLayout[0].AlignedByteOffset = 0;
     polygonLayout[0].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;

@@ -15,6 +15,7 @@ private:
     {
         XMFLOAT4 position;
         XMFLOAT2 texture;
+        XMFLOAT3 normal;
     };
     
 public:
