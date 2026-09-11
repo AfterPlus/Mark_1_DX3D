@@ -18,11 +18,13 @@ public:
     ~D3dClass();
     D3dClass(const D3dClass&);
     
-    bool Initialize(int, int, bool, HWND, bool, float, float);
+    bool Initialize(int, int, bool, HWND, float, float);
     void Shutdown();
-	
+
     void BeginScene(float, float, float, float);
     void EndScene();
+
+    bool ResizeBuffers(int, int);
 
     ID3D11Device* GetDevice();
     ID3D11DeviceContext* GetDeviceContext();
@@ -35,11 +37,16 @@ public:
 
     void SetBackBufferRenderTarget();
     void ResetViewport();
-    
+
+private:
+    bool CreateSizeDependentResources(int, int);
+
 private:
     bool m_vsync_enabled;
     int m_videoCardMemory;
     char m_videoCardDescription[128];
+    float m_screenDepth;
+    float m_screenNear;
     IDXGISwapChain* m_swapChain;
     ID3D11Device* m_device;
     ID3D11DeviceContext* m_deviceContext;

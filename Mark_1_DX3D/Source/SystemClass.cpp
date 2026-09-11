@@ -6,6 +6,7 @@ SystemClass::SystemClass()
 {
     m_Input = 0;
     m_Application = 0;
+    m_fullscreen = START_FULLSCREEN;
 }
 
 
@@ -143,6 +144,14 @@ LRESULT CALLBACK SystemClass::MessageHandler(HWND hwnd, UINT umsg, WPARAM wparam
         // Check if a key has been pressed on the keyboard.
     case WM_KEYDOWN:
         {
+            // F11 toggles windowed/fullscreen. Bit 30 of lparam is set on OS auto-repeat while the
+            // key is held, so this only fires once per physical press.
+            if(wparam == VK_F11 && !(lparam & 0x40000000))
+            {
+                ToggleFullscreen();
+                return 0;
+            }
+
             // If a key is pressed send it to the input object so it can record that state.
             m_Input->key_down((unsigned int)wparam);
             return 0;
@@ -168,8 +177,9 @@ LRESULT CALLBACK SystemClass::MessageHandler(HWND hwnd, UINT umsg, WPARAM wparam
 void SystemClass::InitializeWindows(int& screenWidth, int& screenHeight)
 {
     WNDCLASSEX wc;
-    int posX, posY;
-    
+    DWORD style, exStyle;
+    int windowX, windowY, windowWidth, windowHeight;
+
     // Get an external pointer to this object.
     ApplicationHandle = this;
 
@@ -196,26 +206,83 @@ void SystemClass::InitializeWindows(int& screenWidth, int& screenHeight)
     // Register the window class.
     RegisterClassEx(&wc);
 
-    // Run windowed at a fixed resolution.
-    screenWidth  = 1280;
-    screenHeight = 720;
+    // Work out the style, position and size for the starting windowed/fullscreen mode.
+    ComputeWindowLayout(m_fullscreen, style, exStyle, windowX, windowY, windowWidth, windowHeight, screenWidth, screenHeight);
 
-    // Place the window in the middle of the screen.
-    posX = (GetSystemMetrics(SM_CXSCREEN) - screenWidth)  / 2;
-    posY = (GetSystemMetrics(SM_CYSCREEN) - screenHeight) / 2;
-
-    // Create the window with the screen settings and get the handle to it.
-    m_hwnd = CreateWindowEx(WS_EX_APPWINDOW, m_applicationName, m_applicationName,
-                            WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_POPUP,
-                            posX, posY, screenWidth, screenHeight, NULL, NULL, m_hinstance, NULL);
+    // Create the window with the computed settings and get the handle to it.
+    m_hwnd = CreateWindowEx(exStyle, m_applicationName, m_applicationName,
+                            style, windowX, windowY, windowWidth, windowHeight, NULL, NULL, m_hinstance, NULL);
 
     // Bring the window up on the screen and set it as main focus.
     ShowWindow(m_hwnd, SW_SHOW);
     SetForegroundWindow(m_hwnd);
     SetFocus(m_hwnd);
 
-    // Hide the mouse cursor.
+    // Show the mouse cursor.
     ShowCursor(true);
+
+    return;
+}
+
+
+void SystemClass::ComputeWindowLayout(bool fullscreen, DWORD& style, DWORD& exStyle, int& x, int& y, int& width, int& height, int& clientWidth, int& clientHeight)
+{
+    RECT windowRect;
+
+    exStyle = WS_EX_APPWINDOW;
+
+    if(fullscreen)
+    {
+        // Borderless window filling the primary monitor.
+        clientWidth  = GetSystemMetrics(SM_CXSCREEN);
+        clientHeight = GetSystemMetrics(SM_CYSCREEN);
+
+        style  = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_POPUP;
+        x      = 0;
+        y      = 0;
+        width  = clientWidth;
+        height = clientHeight;
+    }
+    else
+    {
+        // Fixed-size window with a title bar, system menu and minimize box, centered on screen.
+        clientWidth  = WINDOWED_WIDTH;
+        clientHeight = WINDOWED_HEIGHT;
+
+        style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+
+        // Grow the window rect so the client area ends up exactly clientWidth x clientHeight.
+        windowRect.left   = 0;
+        windowRect.top    = 0;
+        windowRect.right  = clientWidth;
+        windowRect.bottom = clientHeight;
+        AdjustWindowRectEx(&windowRect, style, FALSE, exStyle);
+
+        width  = windowRect.right  - windowRect.left;
+        height = windowRect.bottom - windowRect.top;
+        x = (GetSystemMetrics(SM_CXSCREEN) - width)  / 2;
+        y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
+    }
+
+    return;
+}
+
+
+void SystemClass::ToggleFullscreen()
+{
+    DWORD style, exStyle;
+    int windowX, windowY, windowWidth, windowHeight, clientWidth, clientHeight;
+
+    m_fullscreen = !m_fullscreen;
+
+    ComputeWindowLayout(m_fullscreen, style, exStyle, windowX, windowY, windowWidth, windowHeight, clientWidth, clientHeight);
+
+    SetWindowLongPtr(m_hwnd, GWL_STYLE, style);
+    SetWindowLongPtr(m_hwnd, GWL_EXSTYLE, exStyle);
+    SetWindowPos(m_hwnd, HWND_TOP, windowX, windowY, windowWidth, windowHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+    // Resize the swap chain's back buffer, depth buffer and viewport to match the new client area.
+    m_Application->OnResize(clientWidth, clientHeight);
 
     return;
 }
