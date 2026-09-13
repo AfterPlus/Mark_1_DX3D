@@ -28,11 +28,14 @@ Application::~Application()
 
 bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 {
+    char modelFilename[128];
     char textureFilename[128];
     bool result;
 
     // Create and initialize new direct X object
     m_Direct3D = new D3dClass;
+    
+    strcpy_s(modelFilename, "_Shader/Cube.txt");
 
     result = m_Direct3D->Initialize(screenWidth, screenHeight, VSYNC_ENABLED, hwnd, SCREEN_DEPTH, SCREEN_NEAR);
     if(!result)
@@ -53,7 +56,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Set the name of the texture file that we will be loading.
     strcpy_s(textureFilename, "../Resource/dx11win10tut61_src/data/stone01.tga");
 
-    result = m_Model->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), textureFilename);
+    result = m_Model->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), textureFilename, modelFilename);
     
     if(!result)
     {
