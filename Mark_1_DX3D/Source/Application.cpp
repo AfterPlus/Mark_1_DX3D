@@ -48,7 +48,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Camera = new CameraClass;
 
     // Set the initial position of the camera.
-    m_Camera->SetPosition(0.0f, 0.0f, -5.0f);
+    m_Camera->SetPosition(0.0f, 0.0f, -10.0f);
 
     // Create and initialize the model object.
     m_Model = new ModelClass;
@@ -249,8 +249,7 @@ bool Application::ReadMouse()
 
 bool Application::Render(float rotation)
 {
-    
-    XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
+    XMMATRIX worldMatrix, viewMatrix, projectionMatrix, rotateMatrix, translateMatrix, scaleMatrix, srMatrix;
     bool result;
 
 
@@ -265,9 +264,12 @@ bool Application::Render(float rotation)
     m_Camera->GetViewMatrix(viewMatrix);
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
 
-    // Rotate the world matrix by the rotation value so that the triangle will spin.
-    worldMatrix = XMMatrixRotationY(rotation);
-    
+    rotateMatrix = XMMatrixRotationY(rotation);  // Build the rotation matrix.
+    translateMatrix = XMMatrixTranslation(-2.0f, 0.0f, 0.0f);  // Build the translation matrix.
+
+    // Multiply them together to create the final world transformation matrix.
+    worldMatrix = XMMatrixMultiply(rotateMatrix, translateMatrix);
+
     // Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
     m_Model->Render(m_Direct3D->GetDeviceContext());
 
@@ -279,8 +281,27 @@ bool Application::Render(float rotation)
         return false;
     }
     
+    scaleMatrix = XMMatrixScaling(0.5f, 0.5f, 0.5f);  // Build the scaling matrix.
+    rotateMatrix = XMMatrixRotationY(rotation);  // Build the rotation matrix.
+    translateMatrix = XMMatrixTranslation(2.0f, 2.0f, 5.0f);  // Build the translation matrix.
+
+    // Multiply the scale, rotation, and translation matrices together to create the final world transformation matrix.
+    srMatrix = XMMatrixMultiply(scaleMatrix, rotateMatrix);
+    worldMatrix = XMMatrixMultiply(srMatrix, translateMatrix);
+	
+    // Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
+    m_Model->Render(m_Direct3D->GetDeviceContext());
+
+    // Render the model using the light shader.
+    result = m_LightShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, m_Model->GetTexture(), m_Light->GetDirection(), m_Light->GetDiffuseColor());
+    
+    if(!result)
+    {
+        return false;
+    }
+
     // Present the rendered scene to the screen.
     m_Direct3D->EndScene();
-
+    
     return true;
 }
