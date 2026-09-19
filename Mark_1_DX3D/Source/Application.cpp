@@ -15,16 +15,13 @@ Application::Application()
     m_LightShader = nullptr;
 }
 
-
 Application::Application(const Application& other)
 {
 }
 
-
 Application::~Application()
 {
 }
-
 
 bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 {
@@ -35,7 +32,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create and initialize new direct X object
     m_Direct3D = new D3dClass;
     
-    strcpy_s(modelFilename, "_Shader/Cube.txt");
+    strcpy_s(modelFilename, "_Shader/Sphere.txt");
 
     result = m_Direct3D->Initialize(screenWidth, screenHeight, VSYNC_ENABLED, hwnd, SCREEN_DEPTH, SCREEN_NEAR);
     if(!result)
@@ -48,7 +45,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Camera = new CameraClass;
 
     // Set the initial position of the camera.
-    m_Camera->SetPosition(0.0f, 0.0f, -10.0f);
+    m_Camera->SetPosition(0.0f, 0.0f, -5.0f);
 
     // Create and initialize the model object.
     m_Model = new ModelClass;
@@ -98,7 +95,9 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Light = new LightClass;
     m_Light->SetAmbientColor(1.15f, 1.15f, 1.15f, 1.0f);
     m_Light->SetDiffuseColor(0.5f, 0.5f, 0.5f, 1.0f);
-    m_Light->SetDirection(2.0f, 2.0f, 2.0f);
+    m_Light->SetDirection(1.0f, 0.0f, 1.0f);
+    m_Light->SetSpecularColor(1.0f, 0.0f, 0.0f, 1.0f);
+    m_Light->SetSpecularPower(50.0f);
     
     return true;
     
@@ -110,7 +109,7 @@ void Application::Shutdown()
     if(m_Light)
     {
         delete m_Light;
-        m_Light = 0;
+        m_Light = nullptr;
     }
 
     // Release the light shader object.
@@ -126,7 +125,7 @@ void Application::Shutdown()
     {
         m_TextureShader->Shutdown();
         delete m_TextureShader;
-        m_TextureShader = 0;
+        m_TextureShader = nullptr;
     }
     
     // Release the DirectInput mouse device.
@@ -142,7 +141,7 @@ void Application::Shutdown()
     {
         m_ColorShader->Shutdown();
         delete m_ColorShader;
-        m_ColorShader = 0;
+        m_ColorShader = nullptr;
     }
 
     // Release the model object.
@@ -150,14 +149,14 @@ void Application::Shutdown()
     {
         m_Model->Shutdown();
         delete m_Model;
-        m_Model = 0;
+        m_Model = nullptr;
     }
 
     // Release the camera object.
     if (m_Camera)
     {
         delete m_Camera;
-        m_Camera = 0;
+        m_Camera = nullptr;
     }
 
     // Release the directX object
@@ -202,30 +201,6 @@ bool Application::OnResize(int screenWidth, int screenHeight)
 
     return m_Direct3D->ResizeBuffers(screenWidth, screenHeight);
 }
-
-POINT Application::MousePosition()
-{
-    POINT mousePosition = { m_mouseX, m_mouseY };
-
-    // Poll DirectInput for the latest mouse movement and fold it into the tracked position.
-    if (ReadMouse())
-    {
-        m_mouseX += m_mouseState.lX;
-        m_mouseY += m_mouseState.lY;
-
-        // Keep the position clamped inside the window bounds.
-        if (m_mouseX < 0) { m_mouseX = 0; }
-        if (m_mouseY < 0) { m_mouseY = 0; }
-        if (m_mouseX > m_screenWidth)  { m_mouseX = m_screenWidth; }
-        if (m_mouseY > m_screenHeight) { m_mouseY = m_screenHeight; }
-
-        mousePosition.x = m_mouseX;
-        mousePosition.y = m_mouseY;
-    }
-
-    return mousePosition;
-}
-
 
 bool Application::ReadMouse()
 {
@@ -275,7 +250,9 @@ bool Application::Render(float rotation)
 
     // Render the model using the light shader.
     result = m_LightShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, m_Model->GetTexture(),
-                                   m_Light->GetDirection(), m_Light->GetAmbientColor(), m_Light->GetDiffuseColor());
+                                   m_Light->GetDirection(), m_Light->GetAmbientColor(), m_Light->GetDiffuseColor(),
+                                   m_Camera->GetPosition(), m_Light->GetSpecularColor(), m_Light->GetSpecularPower());
+    
     if(!result)
     {
         return false;
