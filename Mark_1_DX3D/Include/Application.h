@@ -34,8 +34,6 @@ public:
     bool Frame();
     bool OnResize(int screenWidth, int screenHeight);
 
-    POINT MousePosition();
-
 private:
 
     bool Render(float);
@@ -48,6 +46,9 @@ private:
     TextureShaderClass* m_TextureShader;
     LightShaderClass* m_LightShader;
     LightClass* m_Light;
+    
+    LightClass* m_Lights;
+    int m_numLights;
 
     IDirectInput8* m_directInput;
     IDirectInputDevice8* m_mouse;
