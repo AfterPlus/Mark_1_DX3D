@@ -33,7 +33,9 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create and initialize new direct X object
     m_Direct3D = new D3dClass;
     
-    strcpy_s(modelFilename, "_Shader/Sphere.txt");
+    // Set the model and texture filenames.
+    strcpy_s(modelFilename, "_Shader/plane.txt");
+    strcpy_s(textureFilename, "_Shader/stone01.tga");
 
     result = m_Direct3D->Initialize(screenWidth, screenHeight, VSYNC_ENABLED, hwnd, SCREEN_DEPTH, SCREEN_NEAR);
     if(!result)
@@ -51,10 +53,6 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
     // Create and initialize the model object.
     m_Model = new ModelClass;
-
-    // Set the name of the texture file that we will be loading.
-    // TO DO
-    strcpy_s(textureFilename, "../Resource/dx11win10tut61_src/data/stone01.tga");
 
     result = m_Model->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), textureFilename, modelFilename);
     
@@ -253,6 +251,9 @@ bool Application::Render(float rotation)
 
     // Clear the buffers to begin the scene.
     m_Direct3D->BeginScene(0.0f, 0.0f, 0.0f, 1.0f);
+
+    // Generate the view matrix based on the camera's position.
+    m_Camera->Render();
 
     // Get the world, view, and projection matrices from the camera and d3d objects.
     m_Direct3D->GetWorldMatrix(worldMatrix);
