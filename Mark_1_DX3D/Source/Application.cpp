@@ -14,6 +14,7 @@ Application::Application()
     m_Light = nullptr;
     m_LightShader = nullptr;
     m_Light = nullptr;
+    m_Bitmap = nullptr;
 }
 
 Application::Application(const Application& other)
@@ -26,6 +27,7 @@ Application::~Application()
 
 bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 {
+    char bitmapFilename[128];
     char modelFilename[128];
     char textureFilename[128];
     bool result;
@@ -48,7 +50,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Camera = new CameraClass;
 
     // Set the initial position of the camera.
-    m_Camera->SetPosition(0.0f, 2.0f, -12.0f);
+    m_Camera->SetPosition(0.0f, 0.0f, -10.0f);
     m_Camera->Render();
 
     // Create and initialize the model object.
@@ -92,6 +94,19 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
     
+    // Set the file name of the bitmap file.
+    strcpy_s(bitmapFilename, "_Shader/stone01.tga");
+
+    // Create and initialize the bitmap object.
+    m_Bitmap = new Bitmap;
+
+    result = m_Bitmap->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), screenWidth, screenHeight, bitmapFilename, 50, 50);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the bitmap object.", L"Error", MB_OK);
+        return false;
+    }
+    
     // Set the number of lights we will use.
     m_numLights = 4;
 
@@ -117,6 +132,14 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
 void Application::Shutdown()
 {
+    // Release the bitmap object.
+    if(m_Bitmap)
+    {
+        m_Bitmap->Shutdown();
+        delete m_Bitmap;
+        m_Bitmap = nullptr;
+    }
+    
     // Release the light objects.
     if(m_Lights)
     {
@@ -218,7 +241,18 @@ bool Application::OnResize(int screenWidth, int screenHeight)
         return false;
     }
 
-    return m_Direct3D->ResizeBuffers(screenWidth, screenHeight);
+    if (!m_Direct3D->ResizeBuffers(screenWidth, screenHeight))
+    {
+        return false;
+    }
+
+    // The bitmap quad is positioned in pixels relative to the screen centre, so it needs the new size.
+    if (m_Bitmap)
+    {
+        m_Bitmap->SetScreenSize(screenWidth, screenHeight);
+    }
+
+    return true;
 }
 
 bool Application::ReadMouse()
@@ -243,7 +277,7 @@ bool Application::ReadMouse()
 
 bool Application::Render(float rotation)
 {
-    XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
+    XMMATRIX worldMatrix, viewMatrix, projectionMatrix, orthoMatrix;
     XMFLOAT4 diffuseColor[4], lightPosition[4];
     int i;
     bool result;
@@ -258,31 +292,31 @@ bool Application::Render(float rotation)
     // Get the world, view, and projection matrices from the camera and d3d objects.
     m_Direct3D->GetWorldMatrix(worldMatrix);
     m_Camera->GetViewMatrix(viewMatrix);
-    m_Direct3D->GetProjectionMatrix(projectionMatrix);
+    //m_Direct3D->GetProjectionMatrix(projectionMatrix);
+    m_Direct3D->GetOrthoMatrix(orthoMatrix);
 
-    // Get the light properties.
-    for(i=0; i<m_numLights; i++)
-    {
-        // Create the diffuse color array from the four light colors.
-        diffuseColor[i] = m_Lights[i].GetDiffuseColor();
-
-        // Create the light position array from the four light positions.
-        lightPosition[i] = m_Lights[i].GetPosition();
-    }
+    // Turn off the Z buffer to begin all 2D rendering.
+    m_Direct3D->TurnZBufferOff();
     
-    // Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
-    m_Model->Render(m_Direct3D->GetDeviceContext());
-    
-    // Render the model using the light shader.
-    result = m_LightShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, m_Model->GetTexture(),
-                                   diffuseColor, lightPosition);
+    // Put the bitmap vertex and index buffers on the graphics pipeline to prepare them for drawing.
+    result = m_Bitmap->Render(m_Direct3D->GetDeviceContext());
     if(!result)
     {
         return false;
     }
+    
+    // Render the bitmap with the texture shader.
+    result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_Bitmap->GetIndexCount(), worldMatrix, viewMatrix, orthoMatrix, m_Bitmap->GetTexture());
+    if(!result)
+    {
+        return false;
+    }
+    
+    // Turn the Z buffer back on now that all 2D rendering has completed.
+    m_Direct3D->TurnZBufferOn();
 
     // Present the rendered scene to the screen.
     m_Direct3D->EndScene();
-    
+
     return true;
 }

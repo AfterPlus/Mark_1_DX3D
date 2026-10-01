@@ -14,6 +14,7 @@
 #include "textureshaderclass.h"
 #include "LightShaderClass.h"
 #include "LightClass.h"
+#include "Bitmap.h"
 
 // GLOBALS
 const bool VSYNC_ENABLED = true;
@@ -47,6 +48,7 @@ private:
     LightShaderClass* m_LightShader;
     LightClass* m_Light;
     
+    
     LightClass* m_Lights;
     int m_numLights;
 
@@ -56,4 +58,5 @@ private:
     int m_screenWidth, m_screenHeight;
     LONG m_mouseX, m_mouseY;
     POINT m_mousePosition;
+    Bitmap* m_Bitmap;
 };
