@@ -41,6 +41,9 @@ public:
     void TurnZBufferOn();
     void TurnZBufferOff();
 
+    void EnableAlphaBlending();
+    void DisableAlphaBlending();
+
 private:
     bool CreateSizeDependentResources(int, int);
 
@@ -63,6 +66,8 @@ private:
     XMMATRIX m_orthoMatrix;
     D3D11_VIEWPORT m_viewport;
     ID3D11DepthStencilState* m_depthDisabledStencilState;
+    ID3D11BlendState* m_alphaEnableBlendingState;
+    ID3D11BlendState* m_alphaDisableBlendingState;
 };
 
 #endif

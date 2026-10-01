@@ -33,9 +33,15 @@ bool SystemClass::Initialize()
     // Initialize the windows api.
     InitializeWindows(screenWidth, screenHeight);
 
-    // Create and initialize the input object. This object will be used to handle reading the keyboard input from the user.
+    // Create and initialize the input object. This object reads the keyboard and mouse using DirectInput.
     m_Input = new InputClass;
-    m_Input->Initialize();
+
+    result = m_Input->Initialize(m_hinstance, m_hwnd, screenWidth, screenHeight);
+    if(!result)
+    {
+        MessageBox(m_hwnd, L"Could not initialize the input object.", L"Error", MB_OK);
+        return false;
+    }
 
     // Create and initialize the application class object. This object will handle rendering all the graphics for this application.
     m_Application = new Application;
@@ -63,6 +69,7 @@ void SystemClass::Shutdown()
     // Release the input object.
     if(m_Input)
     {
+        m_Input->Shutdown();
         delete m_Input;
         m_Input = 0;
     }
@@ -119,14 +126,15 @@ bool SystemClass::Frame()
     bool result;
 
 
-    // Check if the user pressed escape and wants to exit the application.
-    if(m_Input->is_key_down(VK_ESCAPE))
+    // Do the frame processing for the input object.
+    result = m_Input->Frame();
+    if(!result)
     {
         return false;
     }
 
-    // Do the frame processing for the application class object.
-    result = m_Application->Frame();
+    // Do the frame processing for the application class object (which also checks for the escape key to exit).
+    result = m_Application->Frame(m_Input);
     if(!result)
     {
         return false;
@@ -152,17 +160,8 @@ LRESULT CALLBACK SystemClass::MessageHandler(HWND hwnd, UINT umsg, WPARAM wparam
                 return 0;
             }
 
-            // If a key is pressed send it to the input object so it can record that state.
-            m_Input->key_down((unsigned int)wparam);
-            return 0;
-        }
-
-        // Check if a key has been released on the keyboard.
-    case WM_KEYUP:
-        {
-            // If a key is released then send it to the input object so it can unset the state for that key.
-            m_Input->key_up((unsigned int)wparam);
-            return 0;
+            // All other keyboard and mouse input is read through DirectInput by the input object.
+            return DefWindowProc(hwnd, umsg, wparam, lparam);
         }
 
         // Any other messages send to the default message handler as our application won't make use of them.
@@ -283,6 +282,9 @@ void SystemClass::ToggleFullscreen()
 
     // Resize the swap chain's back buffer, depth buffer and viewport to match the new client area.
     m_Application->OnResize(clientWidth, clientHeight);
+
+    // Keep the tracked mouse location inside the new client area.
+    m_Input->SetScreenSize(clientWidth, clientHeight);
 
     return;
 }
