@@ -25,6 +25,10 @@ Application::Application()
     m_previousFps = -1;
     m_MultiTextureShader = nullptr;
     m_LightMapShader = nullptr;
+    m_AlphaMapShader = nullptr;
+    m_NormalMapShader = nullptr;
+    m_AlphaModel = nullptr;
+    m_NormalModel = nullptr;
 }
 
 Application::Application(const Application& other)
@@ -39,6 +43,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 {
     char textureFilename1[128];
     char textureFilename2[128];
+    char textureFilename3[128];
     char spriteFilename[128];
     char modelFilename[128];
     char fpsString[32];
@@ -69,7 +74,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Camera = new CameraClass;
 
     // Set the initial position of the camera.
-    m_Camera->SetPosition(0.0f, 0.0f, -5.0f);
+    m_Camera->SetPosition(0.0f, 0.0f, -8.0f);
     m_Camera->Render();
     
     // Create and initialize the light map shader object.
@@ -79,6 +84,26 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     if(!result)
     {
         MessageBox(hwnd, L"Could not initialize the light map shader object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the alpha map shader object.
+    m_AlphaMapShader = new AlphaMapShaderClass;
+
+    result = m_AlphaMapShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the alpha map shader object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the normal map shader object.
+    m_NormalMapShader = new NormalMapShaderClass;
+
+    result = m_NormalMapShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the normal map shader object.", L"Error", MB_OK);
         return false;
     }
 
@@ -132,6 +157,40 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         MessageBox(hwnd, L"Could not initialize the light shader object.", L"Error", MB_OK);
         return false;
     }
+
+    // Create and initialize the alpha map model (square blending stone and dirt through the alpha map).
+    strcpy_s(textureFilename1, "_Shader/stone01.tga");
+    strcpy_s(textureFilename2, "_Shader/dirt01.tga");
+    strcpy_s(textureFilename3, "_Shader/alpha01.tga");
+
+    m_AlphaModel = new ModelClass;
+
+    result = m_AlphaModel->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), modelFilename, textureFilename1, textureFilename2, textureFilename3);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the alpha map model object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the normal map model (cube with a color texture and a normal map).
+    strcpy_s(modelFilename, "_Shader/Cube.txt");
+    strcpy_s(textureFilename1, "_Shader/stone01.tga");
+    strcpy_s(textureFilename2, "_Shader/normal01.tga");
+
+    m_NormalModel = new ModelClass;
+
+    result = m_NormalModel->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), modelFilename, textureFilename1, textureFilename2);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the normal map model object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the light object used by the normal map shader.
+    m_Light = new LightClass;
+
+    m_Light->SetDiffuseColor(1.0f, 1.0f, 1.0f, 1.0f);
+    m_Light->SetDirection(0.0f, 0.0f, 1.0f);
 
     // Set the file name of the sprite data file.
     strcpy_s(spriteFilename, "_Shader/sprite_data_01.txt");
@@ -272,6 +331,35 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
 void Application::Shutdown()
 {
+    // Release the normal map and alpha map objects.
+    if(m_NormalModel)
+    {
+        m_NormalModel->Shutdown();
+        delete m_NormalModel;
+        m_NormalModel = nullptr;
+    }
+
+    if(m_AlphaModel)
+    {
+        m_AlphaModel->Shutdown();
+        delete m_AlphaModel;
+        m_AlphaModel = nullptr;
+    }
+
+    if(m_NormalMapShader)
+    {
+        m_NormalMapShader->Shutdown();
+        delete m_NormalMapShader;
+        m_NormalMapShader = nullptr;
+    }
+
+    if(m_AlphaMapShader)
+    {
+        m_AlphaMapShader->Shutdown();
+        delete m_AlphaMapShader;
+        m_AlphaMapShader = nullptr;
+    }
+
     // Release the multitexture shader object.
     if(m_MultiTextureShader)
     {
@@ -553,11 +641,37 @@ bool Application::Render(float rotation)
     m_Camera->GetViewMatrix(viewMatrix);
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
 
-    // Render the model using the multitexture shader.
+    // Render the light map model on the left.
+    worldMatrix = XMMatrixTranslation(-3.0f, 0.0f, 0.0f);
+
     m_Model->Render(m_Direct3D->GetDeviceContext());
 
-    result = m_LightMapShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, 
+    result = m_LightMapShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
                                       m_Model->GetTexture(0), m_Model->GetTexture(1));
+    if(!result)
+    {
+        return false;
+    }
+
+    // Render the alpha map model in the middle.
+    worldMatrix = XMMatrixTranslation(0.0f, 0.0f, 0.0f);
+
+    m_AlphaModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_AlphaMapShader->Render(m_Direct3D->GetDeviceContext(), m_AlphaModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                      m_AlphaModel->GetTexture(0), m_AlphaModel->GetTexture(1), m_AlphaModel->GetTexture(2));
+    if(!result)
+    {
+        return false;
+    }
+
+    // Render the rotating normal mapped cube on the right.
+    worldMatrix = XMMatrixMultiply(XMMatrixRotationY(rotation), XMMatrixTranslation(3.0f, 0.0f, 0.0f));
+
+    m_NormalModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_NormalMapShader->Render(m_Direct3D->GetDeviceContext(), m_NormalModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                       m_NormalModel->GetTexture(0), m_NormalModel->GetTexture(1), m_Light->GetDirection(), m_Light->GetDiffuseColor());
     if(!result)
     {
         return false;
