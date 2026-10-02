@@ -16,6 +16,7 @@
 #include "TextClass.h"
 #include "FpsClass.h"
 #include "Multitextureshaderclass.h"
+#include "lightmapshaderclass.h"
 #include "ModelClass.h"
 
 // GLOBALS
@@ -49,6 +50,7 @@ private:
     LightShaderClass* m_LightShader;
     LightClass* m_Light;
     MultiTextureShaderClass* m_MultiTextureShader;
+    LightMapShaderClass* m_LightMapShader;
 
 
     LightClass* m_Lights;
