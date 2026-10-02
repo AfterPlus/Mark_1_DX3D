@@ -15,6 +15,8 @@
 #include "FontClass.h"
 #include "TextClass.h"
 #include "FpsClass.h"
+#include "Multitextureshaderclass.h"
+#include "ModelClass.h"
 
 // GLOBALS
 const bool VSYNC_ENABLED = true;
@@ -46,6 +48,7 @@ private:
     TextureShaderClass* m_TextureShader;
     LightShaderClass* m_LightShader;
     LightClass* m_Light;
+    MultiTextureShaderClass* m_MultiTextureShader;
 
 
     LightClass* m_Lights;

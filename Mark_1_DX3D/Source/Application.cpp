@@ -23,6 +23,7 @@ Application::Application()
     m_TextString2 = nullptr;
     m_MouseStrings = nullptr;
     m_previousFps = -1;
+    m_MultiTextureShader = nullptr;
 }
 
 Application::Application(const Application& other)
@@ -35,9 +36,10 @@ Application::~Application()
 
 bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 {
+    char textureFilename1[128];
+    char textureFilename2[128];
     char spriteFilename[128];
     char modelFilename[128];
-    char textureFilename[128];
     char fpsString[32];
     char mouseString1[32], mouseString2[32], mouseString3[32];
     char helloString[32], goodbyeString[32];
@@ -52,7 +54,8 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
     // Set the model and texture filenames.
     strcpy_s(modelFilename, "_Shader/plane.txt");
-    strcpy_s(textureFilename, "_Shader/stone01.tga");
+    strcpy_s(textureFilename1, "_Shader/stone01.tga");
+    strcpy_s(textureFilename2, "_Shader/dirt01.tga");
 
     result = m_Direct3D->Initialize(screenWidth, screenHeight, VSYNC_ENABLED, hwnd, SCREEN_DEPTH, SCREEN_NEAR);
     if(!result)
@@ -65,13 +68,23 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Camera = new CameraClass;
 
     // Set the initial position of the camera.
-    m_Camera->SetPosition(0.0f, 0.0f, -10.0f);
+    m_Camera->SetPosition(0.0f, 0.0f, -5.0f);
     m_Camera->Render();
 
+    // Create and initialize the multitexture shader object.
+    m_MultiTextureShader = new MultiTextureShaderClass;
+
+    result = m_MultiTextureShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the multitexture shader object.", L"Error", MB_OK);
+        return false;
+    }
+    
     // Create and initialize the model object.
     m_Model = new ModelClass;
 
-    result = m_Model->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), textureFilename, modelFilename);
+    result = m_Model->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), modelFilename, textureFilename1, textureFilename2);
 
     if(!result)
     {
@@ -248,6 +261,14 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
 void Application::Shutdown()
 {
+    // Release the multitexture shader object.
+    if(m_MultiTextureShader)
+    {
+        m_MultiTextureShader->Shutdown();
+        delete m_MultiTextureShader;
+        m_MultiTextureShader = nullptr;
+    }
+    
     // Release the text objects.
     if(m_TextString2)
     {
@@ -502,87 +523,27 @@ bool Application::OnResize(int screenWidth, int screenHeight)
 
 bool Application::Render(float rotation)
 {
-    XMMATRIX worldMatrix, viewMatrix, orthoMatrix;
+    XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
     bool result;
 
 
     // Clear the buffers to begin the scene.
     m_Direct3D->BeginScene(0.0f, 0.0f, 0.0f, 1.0f);
 
-    // Generate the view matrix based on the camera's position.
-    m_Camera->Render();
-
     // Get the world, view, and projection matrices from the camera and d3d objects.
     m_Direct3D->GetWorldMatrix(worldMatrix);
     m_Camera->GetViewMatrix(viewMatrix);
-    m_Direct3D->GetOrthoMatrix(orthoMatrix);
+    m_Direct3D->GetProjectionMatrix(projectionMatrix);
 
-    // Turn off the Z buffer to begin all 2D rendering.
-    m_Direct3D->TurnZBufferOff();
+    // Render the model using the multitexture shader.
+    m_Model->Render(m_Direct3D->GetDeviceContext());
 
-    // Put the sprite vertex and index buffers on the graphics pipeline to prepare them for drawing.
-    result = m_Sprite->Render(m_Direct3D->GetDeviceContext());
+    result = m_MultiTextureShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, 
+                                          m_Model->GetTexture(0), m_Model->GetTexture(1));
     if(!result)
     {
         return false;
     }
-
-    // Render the sprite with the texture shader.
-    result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_Sprite->GetIndexCount(), worldMatrix, viewMatrix, orthoMatrix, m_Sprite->GetTexture());
-    if(!result)
-    {
-        return false;
-    }
-
-    // Enable alpha blending so the text only draws the character pixels and not the black background of each quad.
-    m_Direct3D->EnableAlphaBlending();
-
-    // Render the fps text string using the font shader.
-    m_FpsString->Render(m_Direct3D->GetDeviceContext());
-
-    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_FpsString->GetIndexCount(), worldMatrix, viewMatrix, orthoMatrix,
-                                  m_Font->GetTexture(), m_FpsString->GetPixelColor());
-    if(!result)
-    {
-        return false;
-    }
-
-    // Render the mouse text strings using the font shader.
-    for(int i=0; i<3; i++)
-    {
-        m_MouseStrings[i].Render(m_Direct3D->GetDeviceContext());
-
-        result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_MouseStrings[i].GetIndexCount(), worldMatrix, viewMatrix, orthoMatrix,
-                                      m_Font->GetTexture(), m_MouseStrings[i].GetPixelColor());
-        if(!result)
-        {
-            return false;
-        }
-    }
-
-    // Render the first text string using the font shader.
-    m_TextString1->Render(m_Direct3D->GetDeviceContext());
-
-    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_TextString1->GetIndexCount(), worldMatrix, viewMatrix, orthoMatrix,
-                                  m_Font->GetTexture(), m_TextString1->GetPixelColor());
-    if(!result)
-    {
-        return false;
-    }
-
-    // Render the second text string using the font shader.
-    m_TextString2->Render(m_Direct3D->GetDeviceContext());
-
-    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_TextString2->GetIndexCount(), worldMatrix, viewMatrix, orthoMatrix,
-                                  m_Font->GetTexture(), m_TextString2->GetPixelColor());
-    if(!result)
-    {
-        return false;
-    }
-
-    // Turn the Z buffer back on and disable alpha blending now that all 2D rendering has completed.
-    m_Direct3D->TurnZBufferOn();
-    m_Direct3D->DisableAlphaBlending();
 
     // Present the rendered scene to the screen.
     m_Direct3D->EndScene();
