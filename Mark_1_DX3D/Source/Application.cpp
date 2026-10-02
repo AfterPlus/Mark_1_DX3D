@@ -53,7 +53,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Direct3D = new D3dClass;
 
     // Set the model and texture filenames.
-    strcpy_s(modelFilename, "_Shader/plane.txt");
+    strcpy_s(modelFilename, "_Shader/square.txt");
     strcpy_s(textureFilename1, "_Shader/stone01.tga");
     strcpy_s(textureFilename2, "_Shader/dirt01.tga");
 
