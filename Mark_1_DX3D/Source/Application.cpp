@@ -54,6 +54,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     char mouseString1[32], mouseString2[32], mouseString3[32];
     char helloString[32], goodbyeString[32];
     char renderCountString[32];
+    XMMATRIX baseViewMatrix;
     bool result;
 
     // Store the screen size so the text can be repositioned if the window is resized.
@@ -81,6 +82,10 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Set the initial position of the camera.
     m_Camera->SetPosition(0.0f, 0.0f, 0.0f);
     m_Camera->Render();
+
+    // Store the unrotated camera view matrix; the 2D text is drawn with it so it stays fixed on screen.
+    m_Camera->GetViewMatrix(baseViewMatrix);
+    XMStoreFloat4x4(&m_baseViewMatrix, baseViewMatrix);
     
     // Create and initialize the light map shader object.
     m_LightMapShader = new LightMapShaderClass;
@@ -609,7 +614,7 @@ bool Application::Frame(InputClass* Input)
     // Update the sprite object using the frame time.
     m_Sprite->Update(frameTime);
 
-    // The timer reports seconds, but the position object's turn speeds are tuned for milliseconds.
+    // The position object's turn speeds are tuned for the frame time in milliseconds, the timer reports seconds.
     m_Position->SetFrameTime(frameTime * 1000.0f);
 
     // Check if the left or right arrow key has been pressed, if so rotate the camera accordingly.
@@ -699,7 +704,7 @@ bool Application::OnResize(int screenWidth, int screenHeight)
 
 bool Application::Render()
 {
-    XMMATRIX worldMatrix, viewMatrix, projectionMatrix, orthoMatrix;
+    XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix;
     XMFLOAT4 diffuseColor[4], lightPosition[4];
     float positionX, positionY, positionZ, radius;
     int modelCount, renderCount, i;
@@ -775,8 +780,9 @@ bool Application::Render()
         return false;
     }
 
-    // Reset the world matrix for the 2D rendering.
+    // Reset the world matrix and use the unrotated base view for the 2D rendering so the text stays on screen.
     m_Direct3D->GetWorldMatrix(worldMatrix);
+    baseViewMatrix = XMLoadFloat4x4(&m_baseViewMatrix);
 
     // Turn off the Z buffer and turn on alpha blending to begin all 2D rendering.
     m_Direct3D->TurnZBufferOff();
@@ -785,7 +791,7 @@ bool Application::Render()
     // Render the fps text string using the font shader.
     m_FpsString->Render(m_Direct3D->GetDeviceContext());
 
-    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_FpsString->GetIndexCount(), worldMatrix, viewMatrix, orthoMatrix,
+    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_FpsString->GetIndexCount(), worldMatrix, baseViewMatrix, orthoMatrix,
                                   m_Font->GetTexture(), m_FpsString->GetPixelColor());
     if(!result)
     {
@@ -795,7 +801,7 @@ bool Application::Render()
     // Render the render count text string using the font shader.
     m_RenderCountString->Render(m_Direct3D->GetDeviceContext());
 
-    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_RenderCountString->GetIndexCount(), worldMatrix, viewMatrix, orthoMatrix,
+    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_RenderCountString->GetIndexCount(), worldMatrix, baseViewMatrix, orthoMatrix,
                                   m_Font->GetTexture(), m_RenderCountString->GetPixelColor());
     if(!result)
     {

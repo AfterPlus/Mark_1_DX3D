@@ -80,5 +80,6 @@ private:
     ModelListClass* m_ModelList;
     PositionClass* m_Position;
     FrustumClass* m_Frustum;
+    XMFLOAT4X4 m_baseViewMatrix;
     int m_previousFps;
 };
