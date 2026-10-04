@@ -79,13 +79,16 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create the camera object.
     m_Camera = new CameraClass;
 
-    // Set the initial position of the camera.
-    m_Camera->SetPosition(0.0f, 0.0f, 0.0f);
+    // Store a base view matrix for the 2D text. The camera has to be in front of the ortho near plane (z = 0),
+    // so render it once at z = -10 and keep the unrotated matrix; the text then stays fixed on screen.
+    m_Camera->SetPosition(0.0f, 0.0f, -10.0f);
     m_Camera->Render();
-
-    // Store the unrotated camera view matrix; the 2D text is drawn with it so it stays fixed on screen.
     m_Camera->GetViewMatrix(baseViewMatrix);
     XMStoreFloat4x4(&m_baseViewMatrix, baseViewMatrix);
+
+    // Set the initial position of the camera for the 3D scene.
+    m_Camera->SetPosition(0.0f, 0.0f, 0.0f);
+    m_Camera->Render();
     
     // Create and initialize the light map shader object.
     m_LightMapShader = new LightMapShaderClass;
