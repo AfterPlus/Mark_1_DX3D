@@ -19,7 +19,9 @@
 #include "lightmapshaderclass.h"
 #include "AlphaMapShaderClass.h"
 #include "NormalMapShaderClass.h"
-#include "ModelClass.h"
+#include "ModelListClass.h"
+#include "PositionClass.h"
+#include "FrustumClass.h"
 
 // GLOBALS
 const bool VSYNC_ENABLED = true;
@@ -40,8 +42,9 @@ public:
 
 private:
 
-    bool Render(float);
+    bool Render();
     bool UpdateFps();
+    bool UpdateRenderCountString(int);
     bool UpdateMouseStrings(int, int, bool);
 
     D3dClass* m_Direct3D;
@@ -73,5 +76,9 @@ private:
     TextClass* m_TextString1;
     TextClass* m_TextString2;
     TextClass* m_MouseStrings;
+    TextClass* m_RenderCountString;
+    ModelListClass* m_ModelList;
+    PositionClass* m_Position;
+    FrustumClass* m_Frustum;
     int m_previousFps;
 };
