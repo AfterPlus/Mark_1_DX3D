@@ -9,8 +9,6 @@ Application::Application()
     m_TextureShader = nullptr ;
     m_LightShader = nullptr;
     m_Light = nullptr;
-    m_Lights = nullptr;
-    m_numLights = 0;
     m_screenWidth = 0;
     m_screenHeight = 0;
     m_Sprite = nullptr;
@@ -343,25 +341,6 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create the frustum object.
     m_Frustum = new FrustumClass;
 
-    // Set the number of lights we will use.
-    m_numLights = 4;
-
-    // Create and initialize the light objects array.
-    m_Lights = new LightClass[m_numLights];
-
-    // Manually set the color and position of each light.
-    m_Lights[0].SetDiffuseColor(1.0f, 0.0f, 0.0f, 1.0f);  // Red
-    m_Lights[0].SetPosition(-3.0f, 1.0f, 3.0f);
-
-    m_Lights[1].SetDiffuseColor(0.0f, 1.0f, 0.0f, 1.0f);  // Green
-    m_Lights[1].SetPosition(3.0f, 1.0f, 3.0f);
-
-    m_Lights[2].SetDiffuseColor(0.0f, 0.0f, 1.0f, 1.0f);  // Blue
-    m_Lights[2].SetPosition(-3.0f, 1.0f, -3.0f);
-
-    m_Lights[3].SetDiffuseColor(1.0f, 1.0f, 1.0f, 1.0f);  // White
-    m_Lights[3].SetPosition(3.0f, 1.0f, -3.0f);
-
     return true;
 
 }
@@ -510,13 +489,6 @@ void Application::Shutdown()
         m_Sprite->Shutdown();
         delete m_Sprite;
         m_Sprite = nullptr;
-    }
-
-    // Release the light objects.
-    if(m_Lights)
-    {
-        delete [] m_Lights;
-        m_Lights = nullptr;
     }
 
     // Release the light object.
@@ -708,7 +680,6 @@ bool Application::OnResize(int screenWidth, int screenHeight)
 bool Application::Render()
 {
     XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix;
-    XMFLOAT4 diffuseColor[4], lightPosition[4];
     float positionX, positionY, positionZ, radius;
     int modelCount, renderCount, i;
     bool renderModel, result;
@@ -728,13 +699,6 @@ bool Application::Render()
 
     // Construct the frustum for this frame.
     m_Frustum->ConstructFrustum(viewMatrix, projectionMatrix, SCREEN_DEPTH);
-
-    // Create the diffuse color and position arrays from the four light objects.
-    for(i=0; i<m_numLights; i++)
-    {
-        diffuseColor[i] = m_Lights[i].GetDiffuseColor();
-        lightPosition[i] = m_Lights[i].GetPosition();
-    }
 
     // Get the number of models that will be rendered.
     modelCount = m_ModelList->GetModelCount();
@@ -763,9 +727,9 @@ bool Application::Render()
             // Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
             m_Model->Render(m_Direct3D->GetDeviceContext());
 
-            // Render the model using the light shader.
-            result = m_LightShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                           m_Model->GetTexture(0), diffuseColor, lightPosition);
+            // Render the model using the texture shader, which applies full ambient light (the plain texture color).
+            result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                             m_Model->GetTexture(0));
             if(!result)
             {
                 return false;

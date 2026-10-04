@@ -62,9 +62,6 @@ private:
     ModelClass* m_NormalModel;
 
 
-    LightClass* m_Lights;
-    int m_numLights;
-
     int m_screenWidth, m_screenHeight;
     SpriteClass* m_Sprite;
     TimerClass* m_Timer;
