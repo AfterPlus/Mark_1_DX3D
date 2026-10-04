@@ -23,6 +23,8 @@ public:
     void GetMouseLocation(int&, int&);
     bool IsMousePressed();
     void SetScreenSize(int, int);
+    bool IsLeftArrowPressed();
+    bool IsRightArrowPressed();
 
 private:
     bool ReadKeyboard();

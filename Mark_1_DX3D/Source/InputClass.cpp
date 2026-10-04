@@ -95,6 +95,23 @@ bool InputClass::Initialize(HINSTANCE hinstance, HWND hwnd, int screenWidth, int
     return true;
 }
 
+bool InputClass::IsLeftArrowPressed()
+{
+    if(m_keyboardState[DIK_LEFT] & 0x80)
+        return true;
+
+    return false;
+}
+
+
+bool InputClass::IsRightArrowPressed()
+{
+    if(m_keyboardState[DIK_RIGHT] & 0x80)
+        return true;
+
+    return false;
+}
+
 void InputClass::Shutdown()
 {
     // Release the mouse.
