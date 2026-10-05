@@ -28,6 +28,42 @@ const bool VSYNC_ENABLED = true;
 const float SCREEN_DEPTH = 1000.0f;
 const float SCREEN_NEAR = 0.3f;
 
+// The screen edge a HUD widget is docked to. A widget collapses toward its edge when it is minimized.
+enum DockEdge
+{
+    DOCK_LEFT,
+    DOCK_RIGHT,
+    DOCK_TOP,
+    DOCK_BOTTOM
+};
+
+// The HUD widgets, each one a titled group of text lines with a minimize button.
+enum
+{
+    WIDGET_FPS,
+    WIDGET_RENDER,
+    WIDGET_MOUSE,
+    WIDGET_MESSAGES,
+    WIDGET_COUNT
+};
+
+const int WIDGET_MAX_LINES = 3;
+
+struct HudWidget
+{
+    const char* titleText;
+    DockEdge edge;
+    int anchor;                         // Offset along the docked edge in pixels (y for left/right, x for top/bottom).
+    int width;                          // Width of the expanded widget in pixels.
+    int lineCount;
+    TextClass* lines[WIDGET_MAX_LINES]; // The text lines shown while the widget is expanded (owned by the Application).
+    bool minimized;
+    TextClass title;                    // The widget title, only shown while expanded.
+    TextClass button;                   // The minimize / restore button, always shown.
+    int buttonX, buttonY, buttonWidth;  // Button hit area, updated by the layout.
+    int lineX, lineY;                   // Position of the first line, updated by the layout.
+};
+
 class Application
 {
 public:
@@ -46,6 +82,14 @@ private:
     bool UpdateFps();
     bool UpdateRenderCountString(int);
     bool UpdateMouseStrings(int, int, bool);
+
+    bool InitializeWidgets();
+    void ShutdownWidgets();
+    bool LayoutWidgets();
+    bool HandleWidgetClick(int, int);
+    bool RenderWidgets(XMMATRIX, XMMATRIX, XMMATRIX);
+    bool RenderText(TextClass*, XMMATRIX, XMMATRIX, XMMATRIX);
+    void GetLinePosition(int, int, int&, int&);
 
     D3dClass* m_Direct3D;
     CameraClass* m_Camera;
@@ -77,6 +121,9 @@ private:
     ModelListClass* m_ModelList;
     PositionClass* m_Position;
     FrustumClass* m_Frustum;
+    HudWidget m_Widgets[WIDGET_COUNT];
+    bool m_mouseWasDown;
+    bool m_widgetsInitialized;
     XMFLOAT4X4 m_baseViewMatrix;
     int m_previousFps;
 };

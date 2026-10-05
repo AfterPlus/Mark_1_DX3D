@@ -9,6 +9,8 @@ InputClass::InputClass()
     ZeroMemory(m_keyboardState, sizeof(m_keyboardState));
     ZeroMemory(&m_mouseState, sizeof(m_mouseState));
 
+    m_hwnd = nullptr;
+    m_mouseInWindow = false;
     m_screenWidth = 0;
     m_screenHeight = 0;
     m_mouseX = 0;
@@ -26,6 +28,9 @@ InputClass::~InputClass()
 bool InputClass::Initialize(HINSTANCE hinstance, HWND hwnd, int screenWidth, int screenHeight)
 {
     HRESULT result;
+
+    // Store the window so the mouse location can be read relative to its client area.
+    m_hwnd = hwnd;
 
     // Store the screen size which will be used for positioning the mouse cursor.
     m_screenWidth = screenWidth;
@@ -208,9 +213,20 @@ bool InputClass::ReadMouse()
 
 void InputClass::ProcessInput()
 {
-    // Update the location of the mouse cursor based on the change of the mouse location during the frame.
-    m_mouseX += m_mouseState.lX;
-    m_mouseY += m_mouseState.lY;
+    POINT cursor;
+
+    // Track the real cursor position in client coordinates instead of accumulating the relative mouse movement, which drifts
+    // away from the visible cursor and would make the on-screen widget buttons impossible to click accurately.
+    m_mouseInWindow = false;
+
+    if(GetCursorPos(&cursor) && ScreenToClient(m_hwnd, &cursor))
+    {
+        m_mouseX = cursor.x;
+        m_mouseY = cursor.y;
+
+        // The mouse button state is read for the whole desktop, so remember if the cursor is actually over our client area.
+        m_mouseInWindow = (cursor.x >= 0) && (cursor.x < m_screenWidth) && (cursor.y >= 0) && (cursor.y < m_screenHeight);
+    }
 
     // Ensure the mouse location doesn't exceed the screen width or height.
     if(m_mouseX < 0)  { m_mouseX = 0; }
@@ -246,6 +262,11 @@ bool InputClass::IsMousePressed()
     }
 
     return false;
+}
+
+bool InputClass::IsMouseInWindow()
+{
+    return m_mouseInWindow;
 }
 
 void InputClass::SetScreenSize(int screenWidth, int screenHeight)

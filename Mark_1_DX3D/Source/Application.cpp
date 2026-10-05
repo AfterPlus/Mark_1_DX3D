@@ -1,5 +1,12 @@
 #include "Application.h"
 
+// Layout of the HUD widgets, in pixels.
+static const int WIDGET_MARGIN = 10;     // Gap between an expanded widget and the screen edge.
+static const int WIDGET_LINE_HEIGHT = 30;
+static const int WIDGET_HEADER_HEIGHT = 34;
+static const int WIDGET_TITLE_GAP = 8;   // Gap between the minimize button and the widget title.
+static const int WIDGET_BUTTON_PAD = 4;  // Extra clickable pixels around the minimize button.
+
 Application::Application()
 {
     m_Direct3D = nullptr;
@@ -31,6 +38,8 @@ Application::Application()
     m_ModelList = nullptr;
     m_Position = nullptr;
     m_Frustum = nullptr;
+    m_mouseWasDown = false;
+    m_widgetsInitialized = false;
 }
 
 Application::Application(const Application& other)
@@ -330,6 +339,14 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
+    // Group the text into the minimizable HUD widgets and place them.
+    result = InitializeWidgets();
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the HUD widgets.", L"Error", MB_OK);
+        return false;
+    }
+
     // Create and initialize the model list object with 25 randomly positioned spheres.
     m_ModelList = new ModelListClass;
 
@@ -347,6 +364,9 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
 void Application::Shutdown()
 {
+    // Release the HUD widget buttons and titles.
+    ShutdownWidgets();
+
     // Release the frustum, position and model list objects.
     if(m_Frustum)
     {
@@ -566,6 +586,18 @@ bool Application::Frame(InputClass* Input)
     // Check if the mouse has been pressed.
     mouseDown = Input->IsMousePressed();
 
+    // A new left click on a widget's minimize button toggles that widget. Only the press itself counts, not holding the button.
+    if(mouseDown && !m_mouseWasDown && Input->IsMouseInWindow())
+    {
+        result = HandleWidgetClick(mouseX, mouseY);
+        if(!result)
+        {
+            return false;
+        }
+    }
+
+    m_mouseWasDown = mouseDown;
+
     // Update the mouse strings each frame.
     result = UpdateMouseStrings(mouseX, mouseY, mouseDown);
     if(!result)
@@ -617,7 +649,7 @@ bool Application::Frame(InputClass* Input)
 
 bool Application::OnResize(int screenWidth, int screenHeight)
 {
-    char helloString[32], goodbyeString[32];
+    int i;
 
     if (!m_Direct3D)
     {
@@ -659,22 +691,23 @@ bool Application::OnResize(int screenWidth, int screenHeight)
 
     if (m_TextString1)
     {
-        strcpy_s(helloString, "Hello");
         m_TextString1->SetScreenSize(screenWidth, screenHeight);
-        m_TextString1->UpdateText(m_Direct3D->GetDeviceContext(), m_Font, helloString, 100, 200, 1.0f, 1.0f, 1.0f);
     }
 
     if (m_TextString2)
     {
-        strcpy_s(goodbyeString, "Goodbye");
         m_TextString2->SetScreenSize(screenWidth, screenHeight);
-        m_TextString2->UpdateText(m_Direct3D->GetDeviceContext(), m_Font, goodbyeString, 100, 250, 1.0f, 1.0f, 0.0f);
     }
 
-    // Force the fps string to be rebuilt against the new screen size on the next frame.
-    m_previousFps = -1;
+    // The widget titles and buttons are text quads too.
+    for (i = 0; i < WIDGET_COUNT; i++)
+    {
+        m_Widgets[i].title.SetScreenSize(screenWidth, screenHeight);
+        m_Widgets[i].button.SetScreenSize(screenWidth, screenHeight);
+    }
 
-    return true;
+    // The widgets are docked to the screen edges, so place them again and rebuild the static strings.
+    return LayoutWidgets();
 }
 
 bool Application::Render()
@@ -755,21 +788,8 @@ bool Application::Render()
     m_Direct3D->TurnZBufferOff();
     m_Direct3D->EnableAlphaBlending();
 
-    // Render the fps text string using the font shader.
-    m_FpsString->Render(m_Direct3D->GetDeviceContext());
-
-    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_FpsString->GetIndexCount(), worldMatrix, baseViewMatrix, orthoMatrix,
-                                  m_Font->GetTexture(), m_FpsString->GetPixelColor());
-    if(!result)
-    {
-        return false;
-    }
-
-    // Render the render count text string using the font shader.
-    m_RenderCountString->Render(m_Direct3D->GetDeviceContext());
-
-    result = m_FontShader->Render(m_Direct3D->GetDeviceContext(), m_RenderCountString->GetIndexCount(), worldMatrix, baseViewMatrix, orthoMatrix,
-                                  m_Font->GetTexture(), m_RenderCountString->GetPixelColor());
+    // Render the HUD widgets (titles, minimize buttons and, for expanded widgets, their text lines).
+    result = RenderWidgets(worldMatrix, baseViewMatrix, orthoMatrix);
     if(!result)
     {
         return false;
@@ -788,6 +808,7 @@ bool Application::Render()
 bool Application::UpdateRenderCountString(int renderCount)
 {
     char tempString[16], finalString[32];
+    int textX, textY;
 
     // Convert the render count integer to string format.
     sprintf_s(tempString, "%d", renderCount);
@@ -797,7 +818,9 @@ bool Application::UpdateRenderCountString(int renderCount)
     strcat_s(finalString, tempString);
 
     // Update the sentence vertex buffer with the new string information.
-    return m_RenderCountString->UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, 10, 130, 1.0f, 1.0f, 1.0f);
+    GetLinePosition(WIDGET_RENDER, 0, textX, textY);
+
+    return m_RenderCountString->UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, textX, textY, 1.0f, 1.0f, 1.0f);
 }
 
 bool Application::UpdateFps()
@@ -805,6 +828,7 @@ bool Application::UpdateFps()
     int fps;
     char tempString[16], finalString[16];
     float red, green, blue;
+    int textX, textY;
     bool result;
 
 
@@ -861,7 +885,9 @@ bool Application::UpdateFps()
     }
 
     // Update the sentence vertex buffer with the new string information.
-    result = m_FpsString->UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, 10, 10, red, green, blue);
+    GetLinePosition(WIDGET_FPS, 0, textX, textY);
+
+    result = m_FpsString->UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, textX, textY, red, green, blue);
     if(!result)
     {
         return false;
@@ -873,6 +899,7 @@ bool Application::UpdateFps()
 bool Application::UpdateMouseStrings(int mouseX, int mouseY, bool mouseDown)
 {
     char tempString[16], finalString[32];
+    int textX, textY;
     bool result;
 
 
@@ -884,7 +911,8 @@ bool Application::UpdateMouseStrings(int mouseX, int mouseY, bool mouseDown)
     strcat_s(finalString, tempString);
 
     // Update the sentence vertex buffer with the new string information.
-    result = m_MouseStrings[0].UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, 10, 40, 1.0f, 1.0f, 1.0f);
+    GetLinePosition(WIDGET_MOUSE, 0, textX, textY);
+    result = m_MouseStrings[0].UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, textX, textY, 1.0f, 1.0f, 1.0f);
     if(!result)
     {
         return false;
@@ -898,7 +926,8 @@ bool Application::UpdateMouseStrings(int mouseX, int mouseY, bool mouseDown)
     strcat_s(finalString, tempString);
 
     // Update the sentence vertex buffer with the new string information.
-    result = m_MouseStrings[1].UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, 10, 70, 1.0f, 1.0f, 1.0f);
+    GetLinePosition(WIDGET_MOUSE, 1, textX, textY);
+    result = m_MouseStrings[1].UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, textX, textY, 1.0f, 1.0f, 1.0f);
     if(!result)
     {
         return false;
@@ -915,11 +944,333 @@ bool Application::UpdateMouseStrings(int mouseX, int mouseY, bool mouseDown)
     }
 
     // Update the sentence vertex buffer with the new string information.
-    result = m_MouseStrings[2].UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, 10, 100, 1.0f, 1.0f, 1.0f);
+    GetLinePosition(WIDGET_MOUSE, 2, textX, textY);
+    result = m_MouseStrings[2].UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, textX, textY, 1.0f, 1.0f, 1.0f);
     if(!result)
     {
         return false;
     }
 
     return true;
+}
+
+// The arrow on a widget's button points toward the screen edge the widget is docked to while it is expanded (it will
+// collapse that way), and back toward the screen once it is minimized (it will expand that way).
+static const char* GetButtonText(DockEdge edge, bool minimized)
+{
+    switch(edge)
+    {
+        case DOCK_LEFT:   { return minimized ? "[>]" : "[<]"; }
+        case DOCK_RIGHT:  { return minimized ? "[<]" : "[>]"; }
+        case DOCK_TOP:    { return minimized ? "[v]" : "[^]"; }
+        default:          { return minimized ? "[^]" : "[v]"; }
+    }
+}
+
+bool Application::InitializeWidgets()
+{
+    // The widest line each widget can show, used to size the widget so it does not change width as the numbers change.
+    static const char* widestLines[WIDGET_COUNT] = { "Fps: 99999", "Render Count: 999", "Mouse Button: Yes", "Goodbye" };
+    HudWidget* widget;
+    char text[32];
+    int i, lineWidth, headerWidth;
+    bool result;
+
+    // Fps readout on the left edge.
+    widget = &m_Widgets[WIDGET_FPS];
+    widget->titleText = "Fps";
+    widget->edge = DOCK_LEFT;
+    widget->anchor = WIDGET_MARGIN;
+    widget->lineCount = 1;
+    widget->lines[0] = m_FpsString;
+
+    // Render count readout on the top edge.
+    widget = &m_Widgets[WIDGET_RENDER];
+    widget->titleText = "Culling";
+    widget->edge = DOCK_TOP;
+    widget->anchor = 200;
+    widget->lineCount = 1;
+    widget->lines[0] = m_RenderCountString;
+
+    // Mouse readout on the right edge.
+    widget = &m_Widgets[WIDGET_MOUSE];
+    widget->titleText = "Mouse";
+    widget->edge = DOCK_RIGHT;
+    widget->anchor = WIDGET_MARGIN;
+    widget->lineCount = 3;
+    widget->lines[0] = &m_MouseStrings[0];
+    widget->lines[1] = &m_MouseStrings[1];
+    widget->lines[2] = &m_MouseStrings[2];
+
+    // Greetings on the bottom edge.
+    widget = &m_Widgets[WIDGET_MESSAGES];
+    widget->titleText = "Messages";
+    widget->edge = DOCK_BOTTOM;
+    widget->anchor = WIDGET_MARGIN;
+    widget->lineCount = 2;
+    widget->lines[0] = m_TextString1;
+    widget->lines[1] = m_TextString2;
+
+    for(i=0; i<WIDGET_COUNT; i++)
+    {
+        widget = &m_Widgets[i];
+
+        widget->minimized = false;
+        widget->buttonX = 0;
+        widget->buttonY = 0;
+        widget->lineX = 0;
+        widget->lineY = 0;
+
+        // Create the title text, the layout moves it into place.
+        strcpy_s(text, widget->titleText);
+
+        result = widget->title.Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), m_screenWidth, m_screenHeight, 32, m_Font, text, 0, 0, 1.0f, 1.0f, 1.0f);
+        if(!result)
+        {
+            return false;
+        }
+
+        // Create the minimize button text.
+        strcpy_s(text, GetButtonText(widget->edge, false));
+        widget->buttonWidth = m_Font->GetSentencePixelLength(text);
+
+        result = widget->button.Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), m_screenWidth, m_screenHeight, 8, m_Font, text, 0, 0, 0.4f, 0.8f, 1.0f);
+        if(!result)
+        {
+            return false;
+        }
+
+        // The widget is as wide as its widest line or its header, whichever is bigger.
+        strcpy_s(text, widestLines[i]);
+        lineWidth = m_Font->GetSentencePixelLength(text);
+
+        strcpy_s(text, widget->titleText);
+        headerWidth = widget->buttonWidth + WIDGET_TITLE_GAP + m_Font->GetSentencePixelLength(text);
+
+        widget->width = (lineWidth > headerWidth) ? lineWidth : headerWidth;
+    }
+
+    m_widgetsInitialized = true;
+
+    return LayoutWidgets();
+}
+
+void Application::ShutdownWidgets()
+{
+    int i;
+
+    for(i=0; i<WIDGET_COUNT; i++)
+    {
+        m_Widgets[i].button.Shutdown();
+        m_Widgets[i].title.Shutdown();
+    }
+
+    m_widgetsInitialized = false;
+}
+
+bool Application::LayoutWidgets()
+{
+    HudWidget* widget;
+    ID3D11DeviceContext* deviceContext;
+    XMFLOAT4 color;
+    char text[32];
+    int i, edgeInset, panelX, panelY, titleX, expandedHeight, textX, textY;
+    bool result;
+
+    if(!m_widgetsInitialized)
+    {
+        return true;
+    }
+
+    deviceContext = m_Direct3D->GetDeviceContext();
+
+    for(i=0; i<WIDGET_COUNT; i++)
+    {
+        widget = &m_Widgets[i];
+
+        strcpy_s(text, GetButtonText(widget->edge, widget->minimized));
+        widget->buttonWidth = m_Font->GetSentencePixelLength(text);
+
+        expandedHeight = WIDGET_HEADER_HEIGHT + (widget->lineCount * WIDGET_LINE_HEIGHT);
+
+        // An expanded widget keeps a margin to its screen edge, a minimized one is only the button and sits flush against the edge.
+        edgeInset = widget->minimized ? 0 : WIDGET_MARGIN;
+
+        // Place the panel (the header and the lines under it), then the button on the side of the panel that faces the docked edge.
+        switch(widget->edge)
+        {
+            case DOCK_LEFT:
+            {
+                panelX = WIDGET_MARGIN;
+                panelY = widget->anchor;
+                widget->buttonX = edgeInset;
+                widget->buttonY = panelY;
+                titleX = widget->buttonX + widget->buttonWidth + WIDGET_TITLE_GAP;
+                break;
+            }
+
+            case DOCK_RIGHT:
+            {
+                panelX = m_screenWidth - WIDGET_MARGIN - widget->width;
+                panelY = widget->anchor;
+                widget->buttonX = m_screenWidth - edgeInset - widget->buttonWidth;
+                widget->buttonY = panelY;
+                titleX = panelX;
+                break;
+            }
+
+            case DOCK_TOP:
+            {
+                panelX = widget->anchor;
+                panelY = WIDGET_MARGIN;
+                widget->buttonX = panelX;
+                widget->buttonY = edgeInset;
+                titleX = widget->buttonX + widget->buttonWidth + WIDGET_TITLE_GAP;
+                break;
+            }
+
+            default:
+            {
+                panelX = widget->anchor;
+                panelY = m_screenHeight - WIDGET_MARGIN - expandedHeight;
+                widget->buttonX = panelX;
+                widget->buttonY = m_screenHeight - edgeInset - WIDGET_HEADER_HEIGHT;
+                titleX = widget->buttonX + widget->buttonWidth + WIDGET_TITLE_GAP;
+                break;
+            }
+        }
+
+        widget->lineX = panelX;
+        widget->lineY = panelY + WIDGET_HEADER_HEIGHT;
+
+        // Rebuild the button and title text at their new positions. The title only shows while expanded, so it can share the button's row.
+        result = widget->button.UpdateText(deviceContext, m_Font, text, widget->buttonX, widget->buttonY, 0.4f, 0.8f, 1.0f);
+        if(!result)
+        {
+            return false;
+        }
+
+        strcpy_s(text, widget->titleText);
+
+        result = widget->title.UpdateText(deviceContext, m_Font, text, titleX, widget->buttonY, 1.0f, 1.0f, 1.0f);
+        if(!result)
+        {
+            return false;
+        }
+    }
+
+    // The mouse and render count strings are rebuilt every frame and the fps string is rebuilt once the previous fps is reset,
+    // but the static greeting strings have to be rebuilt here.
+    strcpy_s(text, "Hello");
+    GetLinePosition(WIDGET_MESSAGES, 0, textX, textY);
+    color = m_TextString1->GetPixelColor();
+
+    result = m_TextString1->UpdateText(deviceContext, m_Font, text, textX, textY, color.x, color.y, color.z);
+    if(!result)
+    {
+        return false;
+    }
+
+    strcpy_s(text, "Goodbye");
+    GetLinePosition(WIDGET_MESSAGES, 1, textX, textY);
+    color = m_TextString2->GetPixelColor();
+
+    result = m_TextString2->UpdateText(deviceContext, m_Font, text, textX, textY, color.x, color.y, color.z);
+    if(!result)
+    {
+        return false;
+    }
+
+    // Force the fps string to be rebuilt at its new position on the next frame.
+    m_previousFps = -1;
+
+    return true;
+}
+
+bool Application::HandleWidgetClick(int mouseX, int mouseY)
+{
+    HudWidget* widget;
+    int i, fontHeight;
+
+    if(!m_widgetsInitialized)
+    {
+        return true;
+    }
+
+    fontHeight = m_Font->GetFontHeight();
+
+    for(i=0; i<WIDGET_COUNT; i++)
+    {
+        widget = &m_Widgets[i];
+
+        // Check if the click landed on this widget's minimize button.
+        if((mouseX >= widget->buttonX - WIDGET_BUTTON_PAD) && (mouseX < widget->buttonX + widget->buttonWidth + WIDGET_BUTTON_PAD) &&
+           (mouseY >= widget->buttonY) && (mouseY < widget->buttonY + fontHeight))
+        {
+            // Minimize or restore the widget and place it again.
+            widget->minimized = !widget->minimized;
+
+            return LayoutWidgets();
+        }
+    }
+
+    return true;
+}
+
+bool Application::RenderWidgets(XMMATRIX worldMatrix, XMMATRIX baseViewMatrix, XMMATRIX orthoMatrix)
+{
+    HudWidget* widget;
+    int i, j;
+    bool result;
+
+    for(i=0; i<WIDGET_COUNT; i++)
+    {
+        widget = &m_Widgets[i];
+
+        // The button is always shown so the widget can be restored.
+        result = RenderText(&widget->button, worldMatrix, baseViewMatrix, orthoMatrix);
+        if(!result)
+        {
+            return false;
+        }
+
+        // A minimized widget is only its button.
+        if(widget->minimized)
+        {
+            continue;
+        }
+
+        result = RenderText(&widget->title, worldMatrix, baseViewMatrix, orthoMatrix);
+        if(!result)
+        {
+            return false;
+        }
+
+        for(j=0; j<widget->lineCount; j++)
+        {
+            result = RenderText(widget->lines[j], worldMatrix, baseViewMatrix, orthoMatrix);
+            if(!result)
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool Application::RenderText(TextClass* text, XMMATRIX worldMatrix, XMMATRIX baseViewMatrix, XMMATRIX orthoMatrix)
+{
+    // Put the text vertex and index buffers on the pipeline and draw them using the font shader.
+    text->Render(m_Direct3D->GetDeviceContext());
+
+    return m_FontShader->Render(m_Direct3D->GetDeviceContext(), text->GetIndexCount(), worldMatrix, baseViewMatrix, orthoMatrix,
+                                m_Font->GetTexture(), text->GetPixelColor());
+}
+
+void Application::GetLinePosition(int widgetIndex, int lineIndex, int& positionX, int& positionY)
+{
+    // The lines are stacked below the widget header.
+    positionX = m_Widgets[widgetIndex].lineX;
+    positionY = m_Widgets[widgetIndex].lineY + (lineIndex * WIDGET_LINE_HEIGHT);
 }

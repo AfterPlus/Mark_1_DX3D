@@ -22,6 +22,7 @@ public:
     bool IsEscapePressed();
     void GetMouseLocation(int&, int&);
     bool IsMousePressed();
+    bool IsMouseInWindow();
     void SetScreenSize(int, int);
     bool IsLeftArrowPressed();
     bool IsRightArrowPressed();
@@ -39,5 +40,7 @@ private:
     unsigned char m_keyboardState[256];
     DIMOUSESTATE m_mouseState;
 
+    HWND m_hwnd;
+    bool m_mouseInWindow;
     int m_screenWidth, m_screenHeight, m_mouseX, m_mouseY;
 };
