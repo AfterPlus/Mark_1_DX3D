@@ -1,47 +1,36 @@
-////////////////////////////////////////////////////////////////////////////////
-// Filename: displayplaneclass.h
-////////////////////////////////////////////////////////////////////////////////
-#ifndef _DISPLAYPLANECLASS_H_
-#define _DISPLAYPLANECLASS_H_
+#pragma once
 
+#include <d3d11.h>
+#include <directxmath.h>
+using namespace DirectX;
 
-///////////////////////
-// MY CLASS INCLUDES //
-///////////////////////
-#include "d3dclass.h"
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Class name: DisplayPlaneClass
-////////////////////////////////////////////////////////////////////////////////
+// A flat two triangle quad in 3D, used to show a render texture inside the scene.
 class DisplayPlaneClass
 {
 private:
-	struct VertexType
-	{
-		XMFLOAT3 position;
-		XMFLOAT2 texture;
-	};
+    struct VertexType
+    {
+        XMFLOAT4 position;
+        XMFLOAT2 texture;
+    };
 
 public:
-	DisplayPlaneClass();
-	DisplayPlaneClass(const DisplayPlaneClass&);
-	~DisplayPlaneClass();
+    DisplayPlaneClass();
+    DisplayPlaneClass(const DisplayPlaneClass&);
+    ~DisplayPlaneClass();
 
-	bool Initialize(ID3D11Device*, float, float);
-	void Shutdown();
-	void Render(ID3D11DeviceContext*);
+    bool Initialize(ID3D11Device*, float, float);
+    void Shutdown();
+    void Render(ID3D11DeviceContext*);
 
-	int GetIndexCount();
-	
-private:
-	bool InitializeBuffers(ID3D11Device*, float, float);
-	void ShutdownBuffers();
-	void RenderBuffers(ID3D11DeviceContext*);
+    int GetIndexCount();
 
 private:
-	ID3D11Buffer *m_vertexBuffer, *m_indexBuffer;
-	int m_vertexCount, m_indexCount;
+    bool InitializeBuffers(ID3D11Device*, float, float);
+    void ShutdownBuffers();
+
+private:
+    ID3D11Buffer* m_vertexBuffer;
+    ID3D11Buffer* m_indexBuffer;
+    int m_vertexCount, m_indexCount;
 };
-
-#endif

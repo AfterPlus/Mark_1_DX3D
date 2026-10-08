@@ -11,7 +11,6 @@ Application::Application()
 {
     m_Direct3D = nullptr;
     m_Camera = nullptr;
-    m_Model = nullptr;
     m_ColorShader = nullptr;
     m_TextureShader = nullptr ;
     m_LightShader = nullptr;
@@ -34,10 +33,7 @@ Application::Application()
     m_NormalMapShader = nullptr;
     m_AlphaModel = nullptr;
     m_NormalModel = nullptr;
-    m_RenderCountString = nullptr;
-    m_ModelList = nullptr;
     m_Position = nullptr;
-    m_Frustum = nullptr;
     m_RenderTexture = nullptr;
     m_DisplayPlane = nullptr;
     m_cubeRotation = 0.0f;
@@ -63,7 +59,6 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     char fpsString[32];
     char mouseString1[32], mouseString2[32], mouseString3[32];
     char helloString[32], goodbyeString[32];
-    char renderCountString[32];
     XMMATRIX baseViewMatrix;
     bool result;
 
@@ -73,11 +68,6 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
     // Create and initialize new direct X object
     m_Direct3D = new D3dClass;
-
-    // Set the model and texture filenames.
-    strcpy_s(modelFilename, "_Shader/Sphere.txt");
-    strcpy_s(textureFilename1, "_Shader/stone01.tga");
-    strcpy_s(textureFilename2, "_Shader/light01.tga");
 
     result = m_Direct3D->Initialize(screenWidth, screenHeight, VSYNC_ENABLED, hwnd, SCREEN_DEPTH, SCREEN_NEAR);
     if(!result)
@@ -96,8 +86,8 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Camera->GetViewMatrix(baseViewMatrix);
     XMStoreFloat4x4(&m_baseViewMatrix, baseViewMatrix);
 
-    // Set the initial position of the camera for the 3D scene.
-    m_Camera->SetPosition(0.0f, 0.0f, 0.0f);
+    // Set the initial position of the camera for the 3D scene, back far enough to see the display planes.
+    m_Camera->SetPosition(0.0f, 0.0f, -10.0f);
     m_Camera->Render();
     
     // Create and initialize the light map shader object.
@@ -140,17 +130,6 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
     
-    // Create and initialize the model object.
-    m_Model = new ModelClass;
-
-    result = m_Model->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), modelFilename, textureFilename1, textureFilename2);
-
-    if(!result)
-    {
-        MessageBox(hwnd, L"Could not initialize the model object.", L"Error", MB_OK);
-        return false;
-    }
-
     // Create and initialize the color shader object.
     m_ColorShader = new ColorShaderClass;
 
@@ -330,18 +309,6 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
-    // Create and initialize the render count text object.
-    strcpy_s(renderCountString, "Render Count: 0");
-
-    m_RenderCountString = new TextClass;
-
-    result = m_RenderCountString->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), screenWidth, screenHeight, 32, m_Font, renderCountString, 10, 130, 1.0f, 1.0f, 1.0f);
-    if(!result)
-    {
-        MessageBox(hwnd, L"Could not initialize the render count text object.", L"Error", MB_OK);
-        return false;
-    }
-
     // Group the text into the minimizable HUD widgets and place them.
     result = InitializeWidgets();
     if(!result)
@@ -350,16 +317,8 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
-    // Create and initialize the model list object with 25 randomly positioned spheres.
-    m_ModelList = new ModelListClass;
-
-    m_ModelList->Initialize(25);
-
     // Create the position object used to rotate the camera.
     m_Position = new PositionClass;
-
-    // Create the frustum object.
-    m_Frustum = new FrustumClass;
 
     // Create and initialize the render texture the spinning cube is drawn into (256x256, 32 bit float format).
     m_RenderTexture = new RenderTextureClass;
@@ -371,10 +330,10 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
-    // Create and initialize the display plane that shows the render texture. 1x1 matches the square render texture.
+    // Create and initialize the display plane that shows the render texture. A square plane matches the square render texture.
     m_DisplayPlane = new DisplayPlaneClass;
 
-    result = m_DisplayPlane->Initialize(m_Direct3D->GetDevice(), 1.0f, 1.0f);
+    result = m_DisplayPlane->Initialize(m_Direct3D->GetDevice(), 2.0f, 2.0f);
     if(!result)
     {
         MessageBox(hwnd, L"Could not initialize the display plane object.", L"Error", MB_OK);
@@ -405,32 +364,11 @@ void Application::Shutdown()
         m_RenderTexture = nullptr;
     }
 
-    // Release the frustum, position and model list objects.
-    if(m_Frustum)
-    {
-        delete m_Frustum;
-        m_Frustum = nullptr;
-    }
-
+    // Release the position object.
     if(m_Position)
     {
         delete m_Position;
         m_Position = nullptr;
-    }
-
-    if(m_ModelList)
-    {
-        m_ModelList->Shutdown();
-        delete m_ModelList;
-        m_ModelList = nullptr;
-    }
-
-    // Release the render count text object.
-    if(m_RenderCountString)
-    {
-        m_RenderCountString->Shutdown();
-        delete m_RenderCountString;
-        m_RenderCountString = nullptr;
     }
 
     // Release the normal map and alpha map objects.
@@ -578,14 +516,6 @@ void Application::Shutdown()
         m_ColorShader->Shutdown();
         delete m_ColorShader;
         m_ColorShader = nullptr;
-    }
-
-    // Release the model object.
-    if (m_Model)
-    {
-        m_Model->Shutdown();
-        delete m_Model;
-        m_Model = nullptr;
     }
 
     // Release the camera object.
@@ -736,11 +666,6 @@ bool Application::OnResize(int screenWidth, int screenHeight)
         m_MouseStrings[2].SetScreenSize(screenWidth, screenHeight);
     }
 
-    if (m_RenderCountString)
-    {
-        m_RenderCountString->SetScreenSize(screenWidth, screenHeight);
-    }
-
     if (m_TextString1)
     {
         m_TextString1->SetScreenSize(screenWidth, screenHeight);
@@ -798,10 +723,8 @@ bool Application::RenderSceneToTexture()
 bool Application::Render()
 {
     XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix;
-    float positionX, positionY, positionZ, radius;
-    int modelCount, renderCount, i;
-    bool renderModel, result;
-
+    int i;
+    bool result;
 
     // Clear the buffers to begin the scene.
     m_Direct3D->BeginScene(0.0f, 0.0f, 0.0f, 1.0f);
@@ -815,56 +738,13 @@ bool Application::Render()
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
     m_Direct3D->GetOrthoMatrix(orthoMatrix);
 
-    // Construct the frustum for this frame.
-    m_Frustum->ConstructFrustum(viewMatrix, projectionMatrix, SCREEN_DEPTH);
-
-    // Get the number of models that will be rendered.
-    modelCount = m_ModelList->GetModelCount();
-
-    // Initialize the count of models that have been rendered.
-    renderCount = 0;
-
-    // Go through all the models and render them only if they can be seen by the camera view.
-    for(i=0; i<modelCount; i++)
-    {
-        // Get the position of the sphere model at this index.
-        m_ModelList->GetData(i, positionX, positionY, positionZ);
-
-        // Set the radius of the sphere to 1.0 since this is already known.
-        radius = 1.0f;
-
-        // Check if the sphere model is in the view frustum.
-        renderModel = m_Frustum->CheckSphere(positionX, positionY, positionZ, radius);
-
-        // If it can be seen then render it, if not skip this model and check the next sphere.
-        if(renderModel)
-        {
-            // Move the model to the location it should be rendered at.
-            worldMatrix = XMMatrixTranslation(positionX, positionY, positionZ);
-
-            // Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
-            m_Model->Render(m_Direct3D->GetDeviceContext());
-
-            // Render the model using the texture shader, which applies full ambient light (the plain texture color).
-            result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_Model->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                             m_Model->GetTexture(0));
-            if(!result)
-            {
-                return false;
-            }
-
-            // Since this model was rendered then increase the count for this frame.
-            renderCount++;
-        }
-    }
-
-    // Draw three planes showing the render texture, placed in the world in front of the camera.
+    // Draw three planes showing the render texture: one above and two below the origin.
     static const float planeX[3] = { 0.0f, -1.5f, 1.5f };
     static const float planeY[3] = { 1.5f, -1.5f, -1.5f };
 
     for(i=0; i<3; i++)
     {
-        worldMatrix = XMMatrixTranslation(planeX[i], planeY[i], 8.0f);
+        worldMatrix = XMMatrixTranslation(planeX[i], planeY[i], 0.0f);
 
         m_DisplayPlane->Render(m_Direct3D->GetDeviceContext());
 
@@ -874,13 +754,6 @@ bool Application::Render()
         {
             return false;
         }
-    }
-
-    // Update the render count text.
-    result = UpdateRenderCountString(renderCount);
-    if(!result)
-    {
-        return false;
     }
 
     // Reset the world matrix and use the unrotated base view for the 2D rendering so the text stays on screen.
@@ -906,24 +779,6 @@ bool Application::Render()
     m_Direct3D->EndScene();
 
     return true;
-}
-
-bool Application::UpdateRenderCountString(int renderCount)
-{
-    char tempString[16], finalString[32];
-    int textX, textY;
-
-    // Convert the render count integer to string format.
-    sprintf_s(tempString, "%d", renderCount);
-
-    // Setup the render count string.
-    strcpy_s(finalString, "Render Count: ");
-    strcat_s(finalString, tempString);
-
-    // Update the sentence vertex buffer with the new string information.
-    GetLinePosition(WIDGET_RENDER, 0, textX, textY);
-
-    return m_RenderCountString->UpdateText(m_Direct3D->GetDeviceContext(), m_Font, finalString, textX, textY, 1.0f, 1.0f, 1.0f);
 }
 
 bool Application::UpdateFps()
@@ -1073,7 +928,7 @@ static const char* GetButtonText(DockEdge edge, bool minimized)
 bool Application::InitializeWidgets()
 {
     // The widest line each widget can show, used to size the widget so it does not change width as the numbers change.
-    static const char* widestLines[WIDGET_COUNT] = { "Fps: 99999", "Render Count: 999", "Mouse Button: Yes", "Goodbye" };
+    static const char* widestLines[WIDGET_COUNT] = { "Fps: 99999", "Mouse Button: Yes", "Goodbye" };
     HudWidget* widget;
     char text[32];
     int i, lineWidth, headerWidth;
@@ -1086,14 +941,6 @@ bool Application::InitializeWidgets()
     widget->anchor = WIDGET_MARGIN;
     widget->lineCount = 1;
     widget->lines[0] = m_FpsString;
-
-    // Render count readout on the top edge.
-    widget = &m_Widgets[WIDGET_RENDER];
-    widget->titleText = "Culling";
-    widget->edge = DOCK_TOP;
-    widget->anchor = 200;
-    widget->lineCount = 1;
-    widget->lines[0] = m_RenderCountString;
 
     // Mouse readout on the right edge.
     widget = &m_Widgets[WIDGET_MOUSE];

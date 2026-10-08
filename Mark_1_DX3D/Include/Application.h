@@ -19,9 +19,7 @@
 #include "lightmapshaderclass.h"
 #include "AlphaMapShaderClass.h"
 #include "NormalMapShaderClass.h"
-#include "ModelListClass.h"
 #include "PositionClass.h"
-#include "FrustumClass.h"
 #include "RenderTextureClass.h"
 #include "DisplayPlaneClass.h"
 
@@ -43,7 +41,6 @@ enum DockEdge
 enum
 {
     WIDGET_FPS,
-    WIDGET_RENDER,
     WIDGET_MOUSE,
     WIDGET_MESSAGES,
     WIDGET_COUNT
@@ -83,7 +80,6 @@ private:
     bool Render();
     bool RenderSceneToTexture();
     bool UpdateFps();
-    bool UpdateRenderCountString(int);
     bool UpdateMouseStrings(int, int, bool);
 
     bool InitializeWidgets();
@@ -96,7 +92,6 @@ private:
 
     D3dClass* m_Direct3D;
     CameraClass* m_Camera;
-    ModelClass* m_Model;
     ColorShaderClass* m_ColorShader;
     TextureShaderClass* m_TextureShader;
     LightShaderClass* m_LightShader;
@@ -120,10 +115,7 @@ private:
     TextClass* m_TextString1;
     TextClass* m_TextString2;
     TextClass* m_MouseStrings;
-    TextClass* m_RenderCountString;
-    ModelListClass* m_ModelList;
     PositionClass* m_Position;
-    FrustumClass* m_Frustum;
     RenderTextureClass* m_RenderTexture;
     DisplayPlaneClass* m_DisplayPlane;
     float m_cubeRotation;
