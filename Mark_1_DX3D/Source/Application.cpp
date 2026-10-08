@@ -38,6 +38,9 @@ Application::Application()
     m_ModelList = nullptr;
     m_Position = nullptr;
     m_Frustum = nullptr;
+    m_RenderTexture = nullptr;
+    m_DisplayPlane = nullptr;
+    m_cubeRotation = 0.0f;
     m_mouseWasDown = false;
     m_widgetsInitialized = false;
 }
@@ -358,6 +361,26 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create the frustum object.
     m_Frustum = new FrustumClass;
 
+    // Create and initialize the render texture the spinning cube is drawn into (256x256, 32 bit float format).
+    m_RenderTexture = new RenderTextureClass;
+
+    result = m_RenderTexture->Initialize(m_Direct3D->GetDevice(), 256, 256, SCREEN_DEPTH, SCREEN_NEAR, 1);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the render texture object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the display plane that shows the render texture. 1x1 matches the square render texture.
+    m_DisplayPlane = new DisplayPlaneClass;
+
+    result = m_DisplayPlane->Initialize(m_Direct3D->GetDevice(), 1.0f, 1.0f);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the display plane object.", L"Error", MB_OK);
+        return false;
+    }
+
     return true;
 
 }
@@ -366,6 +389,21 @@ void Application::Shutdown()
 {
     // Release the HUD widget buttons and titles.
     ShutdownWidgets();
+
+    // Release the display plane and render texture objects.
+    if(m_DisplayPlane)
+    {
+        m_DisplayPlane->Shutdown();
+        delete m_DisplayPlane;
+        m_DisplayPlane = nullptr;
+    }
+
+    if(m_RenderTexture)
+    {
+        m_RenderTexture->Shutdown();
+        delete m_RenderTexture;
+        m_RenderTexture = nullptr;
+    }
 
     // Release the frustum, position and model list objects.
     if(m_Frustum)
@@ -637,6 +675,20 @@ bool Application::Frame(InputClass* Input)
     // Set the rotation of the camera.
     m_Camera->SetRotation(0.0f, rotationY, 0.0f);
 
+    // Spin the cube that is drawn into the render texture, keeping the angle in [0, 2*pi).
+    m_cubeRotation += frameTime * 1.0f;
+    if(m_cubeRotation > XM_2PI)
+    {
+        m_cubeRotation -= XM_2PI;
+    }
+
+    // Render the cube to the render texture first, the main scene then displays that texture.
+    result = RenderSceneToTexture();
+    if(!result)
+    {
+        return false;
+    }
+
     // Render the graphics scene.
     result = Render();
     if(!result)
@@ -710,6 +762,39 @@ bool Application::OnResize(int screenWidth, int screenHeight)
     return LayoutWidgets();
 }
 
+bool Application::RenderSceneToTexture()
+{
+    XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
+    bool result;
+
+    // Redirect the output to the render texture and clear it to a light blue.
+    m_RenderTexture->SetRenderTarget(m_Direct3D->GetDeviceContext());
+    m_RenderTexture->ClearRenderTarget(m_Direct3D->GetDeviceContext(), 0.0f, 0.5f, 1.0f, 1.0f);
+
+    // Use a fixed view of the cube so the main camera is left untouched.
+    viewMatrix = XMMatrixLookAtLH(XMVectorSet(0.0f, 0.0f, -5.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
+
+    // The render texture has its own projection matrix, the screen one would stretch the image.
+    m_RenderTexture->GetProjectionMatrix(projectionMatrix);
+
+    worldMatrix = XMMatrixRotationY(m_cubeRotation);
+
+    m_NormalModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_NormalModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                     m_NormalModel->GetTexture(0));
+    if(!result)
+    {
+        return false;
+    }
+
+    // Go back to rendering to the back buffer and its viewport.
+    m_Direct3D->SetBackBufferRenderTarget();
+    m_Direct3D->ResetViewport();
+
+    return true;
+}
+
 bool Application::Render()
 {
     XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix;
@@ -770,6 +855,24 @@ bool Application::Render()
 
             // Since this model was rendered then increase the count for this frame.
             renderCount++;
+        }
+    }
+
+    // Draw three planes showing the render texture, placed in the world in front of the camera.
+    static const float planeX[3] = { 0.0f, -1.5f, 1.5f };
+    static const float planeY[3] = { 1.5f, -1.5f, -1.5f };
+
+    for(i=0; i<3; i++)
+    {
+        worldMatrix = XMMatrixTranslation(planeX[i], planeY[i], 8.0f);
+
+        m_DisplayPlane->Render(m_Direct3D->GetDeviceContext());
+
+        result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_DisplayPlane->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                         m_RenderTexture->GetShaderResourceView());
+        if(!result)
+        {
+            return false;
         }
     }
 
