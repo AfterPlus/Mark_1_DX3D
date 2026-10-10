@@ -39,6 +39,7 @@ Application::Application()
     m_ProjectionShader = nullptr;
     m_ProjectionTexture = nullptr;
     m_ViewPoint = nullptr;
+    m_ProjectionLight = nullptr;
     m_mouseWasDown = false;
     m_widgetsInitialized = false;
 }
@@ -360,7 +361,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     }
 
     // Create and initialize the projection texture object.
-    strcpy_s(textureFilename1, "Resources/directx_logo.tga");
+    strcpy_s(textureFilename1, "Resources/grate.tga");
 
     m_ProjectionTexture = new TextureClass;
 
@@ -380,6 +381,13 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_ViewPoint->GenerateViewMatrix();
     m_ViewPoint->GenerateProjectionMatrix();
 
+    // Create the point light that sits at the view point and is shaped by the projected light map.
+    m_ProjectionLight = new LightClass;
+
+    m_ProjectionLight->SetAmbientColor(0.15f, 0.15f, 0.15f, 1.0f);
+    m_ProjectionLight->SetDiffuseColor(1.0f, 1.0f, 1.0f, 1.0f);
+    m_ProjectionLight->SetPosition(2.0f, 5.0f, -2.0f);
+
     return true;
 
 }
@@ -389,7 +397,13 @@ void Application::Shutdown()
     // Release the HUD widget buttons and titles.
     ShutdownWidgets();
 
-    // Release the view point, projection texture, projection shader and models.
+    // Release the projection light, view point, projection texture, projection shader and models.
+    if(m_ProjectionLight)
+    {
+        delete m_ProjectionLight;
+        m_ProjectionLight = nullptr;
+    }
+
     if(m_ViewPoint)
     {
         delete m_ViewPoint;
@@ -760,7 +774,9 @@ bool Application::Render()
     m_GroundModel->Render(m_Direct3D->GetDeviceContext());
 
     result = m_ProjectionShader->Render(m_Direct3D->GetDeviceContext(), m_GroundModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                        viewMatrix2, projectionMatrix2, m_GroundModel->GetTexture(0), m_ProjectionTexture->GetTexture());
+                                        viewMatrix2, projectionMatrix2, m_GroundModel->GetTexture(0), m_ProjectionTexture->GetTexture(),
+                                        m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                        XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z), 1.5f);
     if(!result)
     {
         return false;
@@ -772,7 +788,9 @@ bool Application::Render()
     m_CubeModel->Render(m_Direct3D->GetDeviceContext());
 
     result = m_ProjectionShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                        viewMatrix2, projectionMatrix2, m_CubeModel->GetTexture(0), m_ProjectionTexture->GetTexture());
+                                        viewMatrix2, projectionMatrix2, m_CubeModel->GetTexture(0), m_ProjectionTexture->GetTexture(),
+                                        m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                        XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z), 1.5f);
     if(!result)
     {
         return false;

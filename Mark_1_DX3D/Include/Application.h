@@ -121,6 +121,7 @@ private:
     ProjectionShaderClass* m_ProjectionShader;
     TextureClass* m_ProjectionTexture;
     ViewPointClass* m_ViewPoint;
+    LightClass* m_ProjectionLight;
     HudWidget m_Widgets[WIDGET_COUNT];
     bool m_mouseWasDown;
     bool m_widgetsInitialized;
