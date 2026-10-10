@@ -20,8 +20,9 @@
 #include "AlphaMapShaderClass.h"
 #include "NormalMapShaderClass.h"
 #include "PositionClass.h"
-#include "RenderTextureClass.h"
-#include "DisplayPlaneClass.h"
+#include "TextureClass.h"
+#include "ProjectionShaderClass.h"
+#include "ViewpointClass.h"
 
 // GLOBALS
 const bool VSYNC_ENABLED = true;
@@ -78,7 +79,6 @@ public:
 private:
 
     bool Render();
-    bool RenderSceneToTexture();
     bool UpdateFps();
     bool UpdateMouseStrings(int, int, bool);
 
@@ -116,9 +116,11 @@ private:
     TextClass* m_TextString2;
     TextClass* m_MouseStrings;
     PositionClass* m_Position;
-    RenderTextureClass* m_RenderTexture;
-    DisplayPlaneClass* m_DisplayPlane;
-    float m_cubeRotation;
+    ModelClass* m_GroundModel;
+    ModelClass* m_CubeModel;
+    ProjectionShaderClass* m_ProjectionShader;
+    TextureClass* m_ProjectionTexture;
+    ViewPointClass* m_ViewPoint;
     HudWidget m_Widgets[WIDGET_COUNT];
     bool m_mouseWasDown;
     bool m_widgetsInitialized;

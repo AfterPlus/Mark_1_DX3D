@@ -34,9 +34,11 @@ Application::Application()
     m_AlphaModel = nullptr;
     m_NormalModel = nullptr;
     m_Position = nullptr;
-    m_RenderTexture = nullptr;
-    m_DisplayPlane = nullptr;
-    m_cubeRotation = 0.0f;
+    m_GroundModel = nullptr;
+    m_CubeModel = nullptr;
+    m_ProjectionShader = nullptr;
+    m_ProjectionTexture = nullptr;
+    m_ViewPoint = nullptr;
     m_mouseWasDown = false;
     m_widgetsInitialized = false;
 }
@@ -86,8 +88,9 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_Camera->GetViewMatrix(baseViewMatrix);
     XMStoreFloat4x4(&m_baseViewMatrix, baseViewMatrix);
 
-    // Set the initial position of the camera for the 3D scene, back far enough to see the display planes.
-    m_Camera->SetPosition(0.0f, 0.0f, -10.0f);
+    // Set the initial position and rotation of the camera for the 3D scene, above and behind the ground looking down at it.
+    m_Camera->SetPosition(0.0f, 7.0f, -10.0f);
+    m_Camera->SetRotation(35.0f, 0.0f, 0.0f);
     m_Camera->Render();
     
     // Create and initialize the light map shader object.
@@ -320,25 +323,62 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create the position object used to rotate the camera.
     m_Position = new PositionClass;
 
-    // Create and initialize the render texture the spinning cube is drawn into (256x256, 32 bit float format).
-    m_RenderTexture = new RenderTextureClass;
+    // Create and initialize the ground model.
+    strcpy_s(modelFilename, "Resources/plane01.txt");
+    strcpy_s(textureFilename1, "Resources/metal001.tga");
 
-    result = m_RenderTexture->Initialize(m_Direct3D->GetDevice(), 256, 256, SCREEN_DEPTH, SCREEN_NEAR, 1);
+    m_GroundModel = new ModelClass;
+
+    result = m_GroundModel->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), modelFilename, textureFilename1, textureFilename1);
     if(!result)
     {
-        MessageBox(hwnd, L"Could not initialize the render texture object.", L"Error", MB_OK);
+        MessageBox(hwnd, L"Could not initialize the ground model object.", L"Error", MB_OK);
         return false;
     }
 
-    // Create and initialize the display plane that shows the render texture. A square plane matches the square render texture.
-    m_DisplayPlane = new DisplayPlaneClass;
+    // Create and initialize the cube model.
+    strcpy_s(modelFilename, "Resources/cube.txt");
+    strcpy_s(textureFilename1, "Resources/stone01.tga");
 
-    result = m_DisplayPlane->Initialize(m_Direct3D->GetDevice(), 2.0f, 2.0f);
+    m_CubeModel = new ModelClass;
+
+    result = m_CubeModel->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), modelFilename, textureFilename1, textureFilename1);
     if(!result)
     {
-        MessageBox(hwnd, L"Could not initialize the display plane object.", L"Error", MB_OK);
+        MessageBox(hwnd, L"Could not initialize the cube model object.", L"Error", MB_OK);
         return false;
     }
+
+    // Create and initialize the projection shader object.
+    m_ProjectionShader = new ProjectionShaderClass;
+
+    result = m_ProjectionShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the projection shader object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the projection texture object.
+    strcpy_s(textureFilename1, "Resources/directx_logo.tga");
+
+    m_ProjectionTexture = new TextureClass;
+
+    result = m_ProjectionTexture->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), textureFilename1);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the projection texture object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create the view point object that the texture is projected from and set where it sits and what it looks at.
+    m_ViewPoint = new ViewPointClass;
+
+    m_ViewPoint->SetPosition(2.0f, 5.0f, -2.0f);
+    m_ViewPoint->SetLookAt(0.0f, 0.0f, 0.0f);
+    m_ViewPoint->SetProjectionParameters((XM_PI / 2.0f), 1.0f, 0.1f, 100.0f);
+    m_ViewPoint->GenerateViewMatrix();
+    m_ViewPoint->GenerateProjectionMatrix();
 
     return true;
 
@@ -349,19 +389,39 @@ void Application::Shutdown()
     // Release the HUD widget buttons and titles.
     ShutdownWidgets();
 
-    // Release the display plane and render texture objects.
-    if(m_DisplayPlane)
+    // Release the view point, projection texture, projection shader and models.
+    if(m_ViewPoint)
     {
-        m_DisplayPlane->Shutdown();
-        delete m_DisplayPlane;
-        m_DisplayPlane = nullptr;
+        delete m_ViewPoint;
+        m_ViewPoint = nullptr;
     }
 
-    if(m_RenderTexture)
+    if(m_ProjectionTexture)
     {
-        m_RenderTexture->Shutdown();
-        delete m_RenderTexture;
-        m_RenderTexture = nullptr;
+        m_ProjectionTexture->Shutdown();
+        delete m_ProjectionTexture;
+        m_ProjectionTexture = nullptr;
+    }
+
+    if(m_ProjectionShader)
+    {
+        m_ProjectionShader->Shutdown();
+        delete m_ProjectionShader;
+        m_ProjectionShader = nullptr;
+    }
+
+    if(m_CubeModel)
+    {
+        m_CubeModel->Shutdown();
+        delete m_CubeModel;
+        m_CubeModel = nullptr;
+    }
+
+    if(m_GroundModel)
+    {
+        m_GroundModel->Shutdown();
+        delete m_GroundModel;
+        m_GroundModel = nullptr;
     }
 
     // Release the position object.
@@ -603,21 +663,7 @@ bool Application::Frame(InputClass* Input)
     m_Position->GetRotation(rotationY);
 
     // Set the rotation of the camera.
-    m_Camera->SetRotation(0.0f, rotationY, 0.0f);
-
-    // Spin the cube that is drawn into the render texture, keeping the angle in [0, 2*pi).
-    m_cubeRotation += frameTime * 1.0f;
-    if(m_cubeRotation > XM_2PI)
-    {
-        m_cubeRotation -= XM_2PI;
-    }
-
-    // Render the cube to the render texture first, the main scene then displays that texture.
-    result = RenderSceneToTexture();
-    if(!result)
-    {
-        return false;
-    }
+    m_Camera->SetRotation(35.0f, rotationY, 0.0f);
 
     // Render the graphics scene.
     result = Render();
@@ -687,43 +733,9 @@ bool Application::OnResize(int screenWidth, int screenHeight)
     return LayoutWidgets();
 }
 
-bool Application::RenderSceneToTexture()
-{
-    XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
-    bool result;
-
-    // Redirect the output to the render texture and clear it to a light blue.
-    m_RenderTexture->SetRenderTarget(m_Direct3D->GetDeviceContext());
-    m_RenderTexture->ClearRenderTarget(m_Direct3D->GetDeviceContext(), 0.0f, 0.5f, 1.0f, 1.0f);
-
-    // Use a fixed view of the cube so the main camera is left untouched.
-    viewMatrix = XMMatrixLookAtLH(XMVectorSet(0.0f, 0.0f, -5.0f, 0.0f), XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f), XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
-
-    // The render texture has its own projection matrix, the screen one would stretch the image.
-    m_RenderTexture->GetProjectionMatrix(projectionMatrix);
-
-    worldMatrix = XMMatrixRotationY(m_cubeRotation);
-
-    m_NormalModel->Render(m_Direct3D->GetDeviceContext());
-
-    result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_NormalModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                     m_NormalModel->GetTexture(0));
-    if(!result)
-    {
-        return false;
-    }
-
-    // Go back to rendering to the back buffer and its viewport.
-    m_Direct3D->SetBackBufferRenderTarget();
-    m_Direct3D->ResetViewport();
-
-    return true;
-}
-
 bool Application::Render()
 {
-    XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix;
-    int i;
+    XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix, viewMatrix2, projectionMatrix2;
     bool result;
 
     // Clear the buffers to begin the scene.
@@ -738,22 +750,32 @@ bool Application::Render()
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
     m_Direct3D->GetOrthoMatrix(orthoMatrix);
 
-    // Draw three planes showing the render texture: one above and two below the origin.
-    static const float planeX[3] = { 0.0f, -1.5f, 1.5f };
-    static const float planeY[3] = { 1.5f, -1.5f, -1.5f };
+    // Get the view and projection matrices of the view point the texture is projected from.
+    m_ViewPoint->GetViewMatrix(viewMatrix2);
+    m_ViewPoint->GetProjectionMatrix(projectionMatrix2);
 
-    for(i=0; i<3; i++)
+    // Render the ground with the projected texture.
+    worldMatrix = XMMatrixTranslation(0.0f, 1.0f, 0.0f);
+
+    m_GroundModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_ProjectionShader->Render(m_Direct3D->GetDeviceContext(), m_GroundModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                        viewMatrix2, projectionMatrix2, m_GroundModel->GetTexture(0), m_ProjectionTexture->GetTexture());
+    if(!result)
     {
-        worldMatrix = XMMatrixTranslation(planeX[i], planeY[i], 0.0f);
+        return false;
+    }
 
-        m_DisplayPlane->Render(m_Direct3D->GetDeviceContext());
+    // Render the cube with the projected texture.
+    worldMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);
 
-        result = m_TextureShader->Render(m_Direct3D->GetDeviceContext(), m_DisplayPlane->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                         m_RenderTexture->GetShaderResourceView());
-        if(!result)
-        {
-            return false;
-        }
+    m_CubeModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_ProjectionShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                        viewMatrix2, projectionMatrix2, m_CubeModel->GetTexture(0), m_ProjectionTexture->GetTexture());
+    if(!result)
+    {
+        return false;
     }
 
     // Reset the world matrix and use the unrotated base view for the 2D rendering so the text stays on screen.
