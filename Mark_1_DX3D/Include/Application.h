@@ -23,11 +23,16 @@
 #include "TextureClass.h"
 #include "ProjectionShaderClass.h"
 #include "ViewpointClass.h"
+#include "RenderTextureClass.h"
+#include "DepthShaderClass.h"
+#include "ShadowShaderClass.h"
 
 // GLOBALS
 const bool VSYNC_ENABLED = true;
 const float SCREEN_DEPTH = 1000.0f;
 const float SCREEN_NEAR = 0.3f;
+const int SHADOWMAP_WIDTH = 1024;
+const int SHADOWMAP_HEIGHT = 1024;
 
 // The screen edge a HUD widget is docked to. A widget collapses toward its edge when it is minimized.
 enum DockEdge
@@ -79,6 +84,7 @@ public:
 private:
 
     bool Render();
+    bool RenderDepthToTexture();
     bool UpdateFps();
     bool UpdateMouseStrings(int, int, bool);
 
@@ -122,6 +128,9 @@ private:
     TextureClass* m_ProjectionTexture;
     ViewPointClass* m_ViewPoint;
     LightClass* m_ProjectionLight;
+    RenderTextureClass* m_RenderTexture;
+    DepthShaderClass* m_DepthShader;
+    ShadowShaderClass* m_ShadowShader;
     HudWidget m_Widgets[WIDGET_COUNT];
     bool m_mouseWasDown;
     bool m_widgetsInitialized;

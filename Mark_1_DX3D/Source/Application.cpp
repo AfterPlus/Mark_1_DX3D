@@ -40,6 +40,9 @@ Application::Application()
     m_ProjectionTexture = nullptr;
     m_ViewPoint = nullptr;
     m_ProjectionLight = nullptr;
+    m_RenderTexture = nullptr;
+    m_DepthShader = nullptr;
+    m_ShadowShader = nullptr;
     m_mouseWasDown = false;
     m_widgetsInitialized = false;
 }
@@ -388,6 +391,36 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_ProjectionLight->SetDiffuseColor(1.0f, 1.0f, 1.0f, 1.0f);
     m_ProjectionLight->SetPosition(2.0f, 5.0f, -2.0f);
 
+    // Create and initialize the render texture the shadow map is rendered into (32 bit float so the depth keeps its precision).
+    m_RenderTexture = new RenderTextureClass;
+
+    result = m_RenderTexture->Initialize(m_Direct3D->GetDevice(), SHADOWMAP_WIDTH, SHADOWMAP_HEIGHT, SCREEN_DEPTH, SCREEN_NEAR, 2);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the render texture object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the depth shader object.
+    m_DepthShader = new DepthShaderClass;
+
+    result = m_DepthShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the depth shader object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the shadow shader object.
+    m_ShadowShader = new ShadowShaderClass;
+
+    result = m_ShadowShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the shadow shader object.", L"Error", MB_OK);
+        return false;
+    }
+
     return true;
 
 }
@@ -396,6 +429,28 @@ void Application::Shutdown()
 {
     // Release the HUD widget buttons and titles.
     ShutdownWidgets();
+
+    // Release the shadow shader, depth shader and render texture.
+    if(m_ShadowShader)
+    {
+        m_ShadowShader->Shutdown();
+        delete m_ShadowShader;
+        m_ShadowShader = nullptr;
+    }
+
+    if(m_DepthShader)
+    {
+        m_DepthShader->Shutdown();
+        delete m_DepthShader;
+        m_DepthShader = nullptr;
+    }
+
+    if(m_RenderTexture)
+    {
+        m_RenderTexture->Shutdown();
+        delete m_RenderTexture;
+        m_RenderTexture = nullptr;
+    }
 
     // Release the projection light, view point, projection texture, projection shader and models.
     if(m_ProjectionLight)
@@ -679,6 +734,19 @@ bool Application::Frame(InputClass* Input)
     // Set the rotation of the camera.
     m_Camera->SetRotation(35.0f, rotationY, 0.0f);
 
+    // Sweep the light from side to side so the shadows move.
+    static float lightPositionX = -5.0f;
+    lightPositionX += 3.0f * frameTime;
+    if(lightPositionX > 5.0f)
+    {
+        lightPositionX = -5.0f;
+    }
+
+    m_ProjectionLight->SetPosition(lightPositionX, 5.0f, -2.0f);
+    m_ViewPoint->SetPosition(lightPositionX, 5.0f, -2.0f);
+    m_ViewPoint->SetLookAt(lightPositionX - 2.0f, 0.0f, 0.0f);
+    m_ViewPoint->GenerateViewMatrix();
+
     // Render the graphics scene.
     result = Render();
     if(!result)
@@ -752,6 +820,11 @@ bool Application::Render()
     XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix, viewMatrix2, projectionMatrix2;
     bool result;
 
+    // Render the scene from the light's point of view into the shadow map.
+    result = RenderDepthToTexture();
+    if(!result)
+        return false;
+
     // Clear the buffers to begin the scene.
     m_Direct3D->BeginScene(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -764,33 +837,33 @@ bool Application::Render()
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
     m_Direct3D->GetOrthoMatrix(orthoMatrix);
 
-    // Get the view and projection matrices of the view point the texture is projected from.
+    // Get the view and projection matrices of the light.
     m_ViewPoint->GetViewMatrix(viewMatrix2);
     m_ViewPoint->GetProjectionMatrix(projectionMatrix2);
 
-    // Render the ground with the projected texture.
+    // Render the ground with shadows.
     worldMatrix = XMMatrixTranslation(0.0f, 1.0f, 0.0f);
 
     m_GroundModel->Render(m_Direct3D->GetDeviceContext());
 
-    result = m_ProjectionShader->Render(m_Direct3D->GetDeviceContext(), m_GroundModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                        viewMatrix2, projectionMatrix2, m_GroundModel->GetTexture(0), m_ProjectionTexture->GetTexture(),
-                                        m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
-                                        XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z), 1.5f);
+    result = m_ShadowShader->Render(m_Direct3D->GetDeviceContext(), m_GroundModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                    viewMatrix2, projectionMatrix2, m_GroundModel->GetTexture(0), m_RenderTexture->GetShaderResourceView(),
+                                    m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                    XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z));
     if(!result)
     {
         return false;
     }
 
-    // Render the cube with the projected texture.
+    // Render the cube with shadows.
     worldMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);
 
     m_CubeModel->Render(m_Direct3D->GetDeviceContext());
 
-    result = m_ProjectionShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                        viewMatrix2, projectionMatrix2, m_CubeModel->GetTexture(0), m_ProjectionTexture->GetTexture(),
-                                        m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
-                                        XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z), 1.5f);
+    result = m_ShadowShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                    viewMatrix2, projectionMatrix2, m_CubeModel->GetTexture(0), m_RenderTexture->GetShaderResourceView(),
+                                    m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                    XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z));
     if(!result)
     {
         return false;
@@ -821,6 +894,50 @@ bool Application::Render()
     return true;
 }
 
+bool Application::RenderDepthToTexture()
+{
+    XMMATRIX worldMatrix, lightViewMatrix, lightProjectionMatrix;
+    bool result;
+
+    // Render into the shadow map instead of the back buffer, and clear it to the farthest depth.
+    m_RenderTexture->SetRenderTarget(m_Direct3D->GetDeviceContext());
+    m_RenderTexture->ClearRenderTarget(m_Direct3D->GetDeviceContext(), 1.0f, 1.0f, 1.0f, 1.0f);
+
+    // The light matrices were regenerated for this frame.
+    m_ViewPoint->GetViewMatrix(lightViewMatrix);
+    m_ViewPoint->GetProjectionMatrix(lightProjectionMatrix);
+
+    // Render the ground into the shadow map.
+    m_Direct3D->GetWorldMatrix(worldMatrix);
+    worldMatrix = XMMatrixTranslation(0.0f, 1.0f, 0.0f);
+
+    m_GroundModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_DepthShader->Render(m_Direct3D->GetDeviceContext(), m_GroundModel->GetIndexCount(), worldMatrix, lightViewMatrix, lightProjectionMatrix);
+    if(!result)
+    {
+        return false;
+    }
+
+    // Render the cube into the shadow map.
+    m_Direct3D->GetWorldMatrix(worldMatrix);
+    worldMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);
+
+    m_CubeModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_DepthShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, lightViewMatrix, lightProjectionMatrix);
+    if(!result)
+    {
+        return false;
+    }
+
+    // Go back to rendering into the back buffer with the normal viewport.
+    m_Direct3D->SetBackBufferRenderTarget();
+    m_Direct3D->ResetViewport();
+
+    return true;
+}
+
 bool Application::UpdateFps()
 {
     int fps;
@@ -838,18 +955,14 @@ bool Application::UpdateFps()
 
     // Check if the fps from the previous frame was the same, if so don't need to update the text string.
     if(m_previousFps == fps)
-    {
         return true;
-    }
 
     // Store the fps for checking next frame.
     m_previousFps = fps;
 
     // Truncate the fps to below 100,000.
     if(fps > 99999)
-    {
         fps = 99999;
-    }
 
     // Convert the fps integer to string format.
     sprintf_s(tempString, "%d", fps);
