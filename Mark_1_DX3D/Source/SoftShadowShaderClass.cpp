@@ -3,14 +3,14 @@
 
 SoftShadowShaderClass::SoftShadowShaderClass()
 {
-    m_vertexShader = 0;
-    m_pixelShader = 0;
-    m_layout = 0;
-    m_matrixBuffer = 0;
-    m_sampleStateClamp = 0;
-    m_sampleStateWrap = 0;
-    m_lightPositionBuffer = 0;
-    m_lightBuffer = 0;
+    m_vertexShader = nullptr;
+    m_pixelShader = nullptr;
+    m_layout = nullptr;
+    m_matrixBuffer = nullptr;
+    m_sampleStateClamp = nullptr;
+    m_sampleStateWrap = nullptr;
+    m_lightPositionBuffer = nullptr;
+    m_lightBuffer = nullptr;
 }
 
 
@@ -34,23 +34,17 @@ bool SoftShadowShaderClass::Initialize(ID3D11Device* device, HWND hwnd)
     // Set the filename of the vertex shader.
     error = wcscpy_s(vsFilename, 128, L"_Shader/SoftShadowVS.HLSL");
     if(error != 0)
-    {
         return false;
-    }
 
     // Set the filename of the pixel shader.
     error = wcscpy_s(psFilename, 128, L"_Shader/SoftShadowPS.HLSL");
     if(error != 0)
-    {
         return false;
-    }
 
     // Initialize the vertex and pixel shaders.
     result = InitializeShader(device, hwnd, vsFilename, psFilename);
     if(!result)
-    {
         return false;
-    }
 
     return true;
 }
@@ -60,8 +54,6 @@ void SoftShadowShaderClass::Shutdown()
 {
     // Shutdown the vertex and pixel shaders as well as the related objects.
     ShutdownShader();
-
-    return;
 }
 
 
@@ -76,9 +68,7 @@ bool SoftShadowShaderClass::Render(ID3D11DeviceContext* deviceContext, int index
     result = SetShaderParameters(deviceContext, worldMatrix, viewMatrix, projectionMatrix, texture, shadowTexture,
                                  ambientColor, diffuseColor, lightPosition, bias);
     if(!result)
-    {
         return false;
-    }
 
     // Now render the prepared buffers with the shader.
     RenderShader(deviceContext, indexCount);
@@ -102,9 +92,9 @@ bool SoftShadowShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WC
 
 
     // Initialize the pointers this function will use to null.
-    errorMessage = 0;
-    vertexShaderBuffer = 0;
-    pixelShaderBuffer = 0;
+    errorMessage = nullptr;
+    vertexShaderBuffer = nullptr;
+    pixelShaderBuffer = nullptr;
 
     // Compile the vertex shader code.
     result = D3DCompileFromFile(vsFilename, NULL, NULL, "SoftShadowVertexShader", "vs_5_0", D3D10_SHADER_ENABLE_STRICTNESS, 0,
@@ -147,16 +137,12 @@ bool SoftShadowShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WC
     // Create the vertex shader from the buffer.
     result = device->CreateVertexShader(vertexShaderBuffer->GetBufferPointer(), vertexShaderBuffer->GetBufferSize(), NULL, &m_vertexShader);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Create the pixel shader from the buffer.
     result = device->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(), pixelShaderBuffer->GetBufferSize(), NULL, &m_pixelShader);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Create the vertex input layout description.
     polygonLayout[0].SemanticName = "POSITION";
@@ -189,16 +175,14 @@ bool SoftShadowShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WC
     // Create the vertex input layout.
     result = device->CreateInputLayout(polygonLayout, numElements, vertexShaderBuffer->GetBufferPointer(), vertexShaderBuffer->GetBufferSize(), &m_layout);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Release the vertex shader buffer and pixel shader buffer since they are no longer needed.
     vertexShaderBuffer->Release();
-    vertexShaderBuffer = 0;
+    vertexShaderBuffer = nullptr;
 
     pixelShaderBuffer->Release();
-    pixelShaderBuffer = 0;
+    pixelShaderBuffer = nullptr;
 
     // Setup the description of the dynamic matrix constant buffer that is in the vertex shader.
     matrixBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -211,9 +195,7 @@ bool SoftShadowShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WC
     // Create the constant buffer pointer so we can access the vertex shader constant buffer from within this class.
     result = device->CreateBuffer(&matrixBufferDesc, NULL, &m_matrixBuffer);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Create a clamp texture sampler state description.
     samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -233,9 +215,7 @@ bool SoftShadowShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WC
     // Create the clamp texture sampler state.
     result = device->CreateSamplerState(&samplerDesc, &m_sampleStateClamp);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Create a wrap texture sampler state description.
     samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -255,9 +235,7 @@ bool SoftShadowShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WC
     // Create the wrap texture sampler state.
     result = device->CreateSamplerState(&samplerDesc, &m_sampleStateWrap);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Setup the description of the light position dynamic constant buffer that is in the vertex shader.
     lightPositionBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -270,9 +248,7 @@ bool SoftShadowShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WC
     // Create the constant buffer pointer so we can access the vertex shader constant buffer from within this class.
     result = device->CreateBuffer(&lightPositionBufferDesc, NULL, &m_lightPositionBuffer);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Setup the description of the light dynamic constant buffer that is in the pixel shader.
     lightBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -285,9 +261,7 @@ bool SoftShadowShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WC
     // Create the constant buffer pointer so we can access the pixel shader constant buffer from within this class.
     result = device->CreateBuffer(&lightBufferDesc, NULL, &m_lightBuffer);
     if(FAILED(result))
-    {
         return false;
-    }
 
     return true;
 }
@@ -299,56 +273,56 @@ void SoftShadowShaderClass::ShutdownShader()
     if(m_lightBuffer)
     {
         m_lightBuffer->Release();
-        m_lightBuffer = 0;
+        m_lightBuffer = nullptr;
     }
 
     // Release the light position constant buffer.
     if(m_lightPositionBuffer)
     {
         m_lightPositionBuffer->Release();
-        m_lightPositionBuffer = 0;
+        m_lightPositionBuffer = nullptr;
     }
 
     // Release the wrap sampler state.
     if(m_sampleStateWrap)
     {
         m_sampleStateWrap->Release();
-        m_sampleStateWrap = 0;
+        m_sampleStateWrap = nullptr;
     }
 
     // Release the clamp sampler state.
     if(m_sampleStateClamp)
     {
         m_sampleStateClamp->Release();
-        m_sampleStateClamp = 0;
+        m_sampleStateClamp = nullptr;
     }
 
     // Release the matrix constant buffer.
     if(m_matrixBuffer)
     {
         m_matrixBuffer->Release();
-        m_matrixBuffer = 0;
+        m_matrixBuffer = nullptr;
     }
 
     // Release the layout.
     if(m_layout)
     {
         m_layout->Release();
-        m_layout = 0;
+        m_layout = nullptr;
     }
 
     // Release the pixel shader.
     if(m_pixelShader)
     {
         m_pixelShader->Release();
-        m_pixelShader = 0;
+        m_pixelShader = nullptr;
     }
 
     // Release the vertex shader.
     if(m_vertexShader)
     {
         m_vertexShader->Release();
-        m_vertexShader = 0;
+        m_vertexShader = nullptr;
     }
 
     return;
@@ -382,7 +356,7 @@ void SoftShadowShaderClass::OutputShaderErrorMessage(ID3D10Blob* errorMessage, H
 
     // Release the error message.
     errorMessage->Release();
-    errorMessage = 0;
+    errorMessage = nullptr;
 
     // Pop a message up on the screen to notify the user to check the text file for compile errors.
     MessageBox(hwnd, L"Error compiling shader.  Check shader-error.txt for message.", shaderFilename, MB_OK);
@@ -411,9 +385,7 @@ bool SoftShadowShaderClass::SetShaderParameters(ID3D11DeviceContext* deviceConte
     // Lock the constant buffer so it can be written to.
     result = deviceContext->Map(m_matrixBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Get a pointer to the data in the constant buffer.
     dataPtr = (MatrixBufferType*)mappedResource.pData;
@@ -435,9 +407,7 @@ bool SoftShadowShaderClass::SetShaderParameters(ID3D11DeviceContext* deviceConte
     // Lock the light position constant buffer so it can be written to.
     result = deviceContext->Map(m_lightPositionBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Get a pointer to the data in the constant buffer.
     dataPtr2 = (LightPositionBufferType*)mappedResource.pData;
@@ -458,9 +428,7 @@ bool SoftShadowShaderClass::SetShaderParameters(ID3D11DeviceContext* deviceConte
     // Lock the light constant buffer so it can be written to.
     result = deviceContext->Map(m_lightBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
     if(FAILED(result))
-    {
         return false;
-    }
 
     // Get a pointer to the data in the constant buffer.
     dataPtr3 = (LightBufferType*)mappedResource.pData;
