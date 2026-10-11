@@ -26,6 +26,7 @@
 #include "RenderTextureClass.h"
 #include "DepthShaderClass.h"
 #include "ShadowShaderClass.h"
+#include "SoftShadowShaderClass.h"
 
 // GLOBALS
 const bool VSYNC_ENABLED = true;
@@ -85,6 +86,7 @@ private:
 
     bool Render();
     bool RenderDepthToTexture();
+    bool RenderBlackAndWhiteShadows();
     bool UpdateFps();
     bool UpdateMouseStrings(int, int, bool);
 
@@ -124,6 +126,7 @@ private:
     PositionClass* m_Position;
     ModelClass* m_GroundModel;
     ModelClass* m_CubeModel;
+    ModelClass* m_SphereModel;
     ProjectionShaderClass* m_ProjectionShader;
     TextureClass* m_ProjectionTexture;
     ViewPointClass* m_ViewPoint;
@@ -131,6 +134,9 @@ private:
     RenderTextureClass* m_RenderTexture;
     DepthShaderClass* m_DepthShader;
     ShadowShaderClass* m_ShadowShader;
+    RenderTextureClass* m_BlackWhiteRenderTexture;
+    SoftShadowShaderClass* m_SoftShadowShader;
+    float m_shadowMapBias;
     HudWidget m_Widgets[WIDGET_COUNT];
     bool m_mouseWasDown;
     bool m_widgetsInitialized;

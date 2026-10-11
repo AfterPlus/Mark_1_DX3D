@@ -43,6 +43,10 @@ Application::Application()
     m_RenderTexture = nullptr;
     m_DepthShader = nullptr;
     m_ShadowShader = nullptr;
+    m_SphereModel = nullptr;
+    m_BlackWhiteRenderTexture = nullptr;
+    m_SoftShadowShader = nullptr;
+    m_shadowMapBias = 0.0f;
     m_mouseWasDown = false;
     m_widgetsInitialized = false;
 }
@@ -353,6 +357,19 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
+    // Create and initialize the sphere model.
+    strcpy_s(modelFilename, "Resources/sphere.txt");
+    strcpy_s(textureFilename1, "Resources/ice.tga");
+
+    m_SphereModel = new ModelClass;
+
+    result = m_SphereModel->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), modelFilename, textureFilename1, textureFilename1);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the sphere model object.", L"Error", MB_OK);
+        return false;
+    }
+
     // Create and initialize the projection shader object.
     m_ProjectionShader = new ProjectionShaderClass;
 
@@ -378,9 +395,9 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create the view point object that the texture is projected from and set where it sits and what it looks at.
     m_ViewPoint = new ViewPointClass;
 
-    m_ViewPoint->SetPosition(2.0f, 5.0f, -2.0f);
+    m_ViewPoint->SetPosition(0.0f, 8.0f, -5.0f);
     m_ViewPoint->SetLookAt(0.0f, 0.0f, 0.0f);
-    m_ViewPoint->SetProjectionParameters((XM_PI / 2.0f), 1.0f, 0.1f, 100.0f);
+    m_ViewPoint->SetProjectionParameters((XM_PI / 2.0f), 1.0f, 3.0f, 100.0f);
     m_ViewPoint->GenerateViewMatrix();
     m_ViewPoint->GenerateProjectionMatrix();
 
@@ -389,7 +406,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
     m_ProjectionLight->SetAmbientColor(0.15f, 0.15f, 0.15f, 1.0f);
     m_ProjectionLight->SetDiffuseColor(1.0f, 1.0f, 1.0f, 1.0f);
-    m_ProjectionLight->SetPosition(2.0f, 5.0f, -2.0f);
+    m_ProjectionLight->SetPosition(0.0f, 8.0f, -5.0f);
 
     // Create and initialize the render texture the shadow map is rendered into (32 bit float so the depth keeps its precision).
     m_RenderTexture = new RenderTextureClass;
@@ -421,6 +438,29 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
+    // Create and initialize the black and white render texture the shadowed scene is rendered into (8 bit, so it can be blurred).
+    m_BlackWhiteRenderTexture = new RenderTextureClass;
+
+    result = m_BlackWhiteRenderTexture->Initialize(m_Direct3D->GetDevice(), SHADOWMAP_WIDTH, SHADOWMAP_HEIGHT, SCREEN_DEPTH, SCREEN_NEAR, 1);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the black and white render texture object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Create and initialize the soft shadow shader object.
+    m_SoftShadowShader = new SoftShadowShaderClass;
+
+    result = m_SoftShadowShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the soft shadow shader object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Set the shadow map bias to fix the floating point precision issues (shadow acne).
+    m_shadowMapBias = 0.005f;
+
     return true;
 
 }
@@ -429,6 +469,21 @@ void Application::Shutdown()
 {
     // Release the HUD widget buttons and titles.
     ShutdownWidgets();
+    
+
+    if(m_SoftShadowShader)
+    {
+        m_SoftShadowShader->Shutdown();
+        delete m_SoftShadowShader;
+        m_SoftShadowShader = nullptr;
+    }
+
+    if(m_BlackWhiteRenderTexture)
+    {
+        m_BlackWhiteRenderTexture->Shutdown();
+        delete m_BlackWhiteRenderTexture;
+        m_BlackWhiteRenderTexture = nullptr;
+    }
 
     // Release the shadow shader, depth shader and render texture.
     if(m_ShadowShader)
@@ -477,6 +532,13 @@ void Application::Shutdown()
         m_ProjectionShader->Shutdown();
         delete m_ProjectionShader;
         m_ProjectionShader = nullptr;
+    }
+
+    if(m_SphereModel)
+    {
+        m_SphereModel->Shutdown();
+        delete m_SphereModel;
+        m_SphereModel = nullptr;
     }
 
     if(m_CubeModel)
@@ -673,9 +735,7 @@ bool Application::Frame(InputClass* Input)
 
     // Check if the user pressed escape and wants to exit the application.
     if(Input->IsEscapePressed())
-    {
         return false;
-    }
 
     // Get the location of the mouse from the input object.
     Input->GetMouseLocation(mouseX, mouseY);
@@ -698,16 +758,12 @@ bool Application::Frame(InputClass* Input)
     // Update the mouse strings each frame.
     result = UpdateMouseStrings(mouseX, mouseY, mouseDown);
     if(!result)
-    {
         return false;
-    }
 
     // Update the frames per second each frame.
     result = UpdateFps();
     if(!result)
-    {
         return false;
-    }
 
     // Update the system stats.
     m_Timer->Frame();
@@ -734,25 +790,10 @@ bool Application::Frame(InputClass* Input)
     // Set the rotation of the camera.
     m_Camera->SetRotation(35.0f, rotationY, 0.0f);
 
-    // Sweep the light from side to side so the shadows move.
-    static float lightPositionX = -5.0f;
-    lightPositionX += 3.0f * frameTime;
-    if(lightPositionX > 5.0f)
-    {
-        lightPositionX = -5.0f;
-    }
-
-    m_ProjectionLight->SetPosition(lightPositionX, 5.0f, -2.0f);
-    m_ViewPoint->SetPosition(lightPositionX, 5.0f, -2.0f);
-    m_ViewPoint->SetLookAt(lightPositionX - 2.0f, 0.0f, 0.0f);
-    m_ViewPoint->GenerateViewMatrix();
-
     // Render the graphics scene.
     result = Render();
     if(!result)
-    {
         return false;
-    }
 
     return true;
 }
@@ -817,19 +858,24 @@ bool Application::OnResize(int screenWidth, int screenHeight)
 
 bool Application::Render()
 {
-    XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix, viewMatrix2, projectionMatrix2;
+    XMMATRIX worldMatrix, viewMatrix, baseViewMatrix, projectionMatrix, orthoMatrix;
     bool result;
+
+    // Update the camera view matrix for this frame.
+    m_Camera->Render();
 
     // Render the scene from the light's point of view into the shadow map.
     result = RenderDepthToTexture();
     if(!result)
         return false;
 
+    // Render the shadowed scene in black and white using the shadow map.
+    result = RenderBlackAndWhiteShadows();
+    if(!result)
+        return false;
+
     // Clear the buffers to begin the scene.
     m_Direct3D->BeginScene(0.0f, 0.0f, 0.0f, 1.0f);
-
-    // Generate the view matrix based on the camera's position and rotation.
-    m_Camera->Render();
 
     // Get the world, view, projection and ortho matrices from the camera and d3d objects.
     m_Direct3D->GetWorldMatrix(worldMatrix);
@@ -837,33 +883,46 @@ bool Application::Render()
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
     m_Direct3D->GetOrthoMatrix(orthoMatrix);
 
-    // Get the view and projection matrices of the light.
-    m_ViewPoint->GetViewMatrix(viewMatrix2);
-    m_ViewPoint->GetProjectionMatrix(projectionMatrix2);
-
-    // Render the ground with shadows.
+    // Render the ground with the soft shadows.
     worldMatrix = XMMatrixTranslation(0.0f, 1.0f, 0.0f);
 
     m_GroundModel->Render(m_Direct3D->GetDeviceContext());
 
-    result = m_ShadowShader->Render(m_Direct3D->GetDeviceContext(), m_GroundModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                    viewMatrix2, projectionMatrix2, m_GroundModel->GetTexture(0), m_RenderTexture->GetShaderResourceView(),
-                                    m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
-                                    XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z));
+    result = m_SoftShadowShader->Render(m_Direct3D->GetDeviceContext(), m_GroundModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                        m_GroundModel->GetTexture(0), m_BlackWhiteRenderTexture->GetShaderResourceView(),
+                                        m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                        XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z),
+                                        m_shadowMapBias);
     if(!result)
     {
         return false;
     }
 
-    // Render the cube with shadows.
-    worldMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);
+    // Render the cube with the soft shadows.
+    worldMatrix = XMMatrixTranslation(-2.0f, 2.0f, 0.0f);
 
     m_CubeModel->Render(m_Direct3D->GetDeviceContext());
 
-    result = m_ShadowShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
-                                    viewMatrix2, projectionMatrix2, m_CubeModel->GetTexture(0), m_RenderTexture->GetShaderResourceView(),
-                                    m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
-                                    XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z));
+    result = m_SoftShadowShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                        m_CubeModel->GetTexture(0), m_BlackWhiteRenderTexture->GetShaderResourceView(),
+                                        m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                        XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z),
+                                        m_shadowMapBias);
+    if(!result)
+    {
+        return false;
+    }
+
+    // Render the sphere with the soft shadows.
+    worldMatrix = XMMatrixTranslation(2.0f, 2.0f, 0.0f);
+
+    m_SphereModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_SoftShadowShader->Render(m_Direct3D->GetDeviceContext(), m_SphereModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                        m_SphereModel->GetTexture(0), m_BlackWhiteRenderTexture->GetShaderResourceView(),
+                                        m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                        XMFLOAT3(m_ProjectionLight->GetPosition().x, m_ProjectionLight->GetPosition().y, m_ProjectionLight->GetPosition().z),
+                                        m_shadowMapBias);
     if(!result)
     {
         return false;
@@ -921,11 +980,87 @@ bool Application::RenderDepthToTexture()
 
     // Render the cube into the shadow map.
     m_Direct3D->GetWorldMatrix(worldMatrix);
-    worldMatrix = XMMatrixTranslation(0.0f, 2.0f, 0.0f);
+    worldMatrix = XMMatrixTranslation(-2.0f, 2.0f, 0.0f);
 
     m_CubeModel->Render(m_Direct3D->GetDeviceContext());
 
     result = m_DepthShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, lightViewMatrix, lightProjectionMatrix);
+    if(!result)
+    {
+        return false;
+    }
+
+    // Render the sphere into the shadow map.
+    m_Direct3D->GetWorldMatrix(worldMatrix);
+    worldMatrix = XMMatrixTranslation(2.0f, 2.0f, 0.0f);
+
+    m_SphereModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_DepthShader->Render(m_Direct3D->GetDeviceContext(), m_SphereModel->GetIndexCount(), worldMatrix, lightViewMatrix, lightProjectionMatrix);
+    if(!result)
+    {
+        return false;
+    }
+
+    // Go back to rendering into the back buffer with the normal viewport.
+    m_Direct3D->SetBackBufferRenderTarget();
+    m_Direct3D->ResetViewport();
+
+    return true;
+}
+
+bool Application::RenderBlackAndWhiteShadows()
+{
+    XMMATRIX worldMatrix, viewMatrix, projectionMatrix, lightViewMatrix, lightProjectionMatrix;
+    XMFLOAT4 lightPosition;
+    bool result;
+
+    // Render into the black and white texture instead of the back buffer.
+    m_BlackWhiteRenderTexture->SetRenderTarget(m_Direct3D->GetDeviceContext());
+    m_BlackWhiteRenderTexture->ClearRenderTarget(m_Direct3D->GetDeviceContext(), 0.0f, 0.0f, 0.0f, 1.0f);
+
+    // Get the camera and light matrices.
+    m_Camera->GetViewMatrix(viewMatrix);
+    m_Direct3D->GetProjectionMatrix(projectionMatrix);
+    m_ViewPoint->GetViewMatrix(lightViewMatrix);
+    m_ViewPoint->GetProjectionMatrix(lightProjectionMatrix);
+
+    lightPosition = m_ProjectionLight->GetPosition();
+
+    // Render the ground in black and white.
+    worldMatrix = XMMatrixTranslation(0.0f, 1.0f, 0.0f);
+
+    m_GroundModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_ShadowShader->Render(m_Direct3D->GetDeviceContext(), m_GroundModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                    lightViewMatrix, lightProjectionMatrix, m_RenderTexture->GetShaderResourceView(),
+                                    XMFLOAT3(lightPosition.x, lightPosition.y, lightPosition.z), m_shadowMapBias);
+    if(!result)
+    {
+        return false;
+    }
+
+    // Render the cube in black and white.
+    worldMatrix = XMMatrixTranslation(-2.0f, 2.0f, 0.0f);
+
+    m_CubeModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_ShadowShader->Render(m_Direct3D->GetDeviceContext(), m_CubeModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                    lightViewMatrix, lightProjectionMatrix, m_RenderTexture->GetShaderResourceView(),
+                                    XMFLOAT3(lightPosition.x, lightPosition.y, lightPosition.z), m_shadowMapBias);
+    if(!result)
+    {
+        return false;
+    }
+
+    // Render the sphere in black and white.
+    worldMatrix = XMMatrixTranslation(2.0f, 2.0f, 0.0f);
+
+    m_SphereModel->Render(m_Direct3D->GetDeviceContext());
+
+    result = m_ShadowShader->Render(m_Direct3D->GetDeviceContext(), m_SphereModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix,
+                                    lightViewMatrix, lightProjectionMatrix, m_RenderTexture->GetShaderResourceView(),
+                                    XMFLOAT3(lightPosition.x, lightPosition.y, lightPosition.z), m_shadowMapBias);
     if(!result)
     {
         return false;
