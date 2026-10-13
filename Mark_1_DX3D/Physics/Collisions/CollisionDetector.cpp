@@ -1,4 +1,4 @@
-#include "PhysicsCommon.h"
+#include "../PhysicsCommon.h"
 #include "CollisionDetector.h"
 #include "IntersectionTests.h"
 
