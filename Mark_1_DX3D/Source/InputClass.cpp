@@ -117,6 +117,30 @@ bool InputClass::IsRightArrowPressed()
     return false;
 }
 
+bool InputClass::IsUpArrowPressed()
+{
+    if(m_keyboardState[DIK_UP] & 0x80)
+        return true;
+
+    return false;
+}
+
+bool InputClass::IsDownArrowPressed()
+{
+    if(m_keyboardState[DIK_DOWN] & 0x80)
+        return true;
+
+    return false;
+}
+
+bool InputClass::IsSpacePressed()
+{
+    if(m_keyboardState[DIK_SPACE] & 0x80)
+        return true;
+
+    return false;
+}
+
 void InputClass::Shutdown()
 {
     // Release the mouse.

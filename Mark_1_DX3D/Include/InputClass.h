@@ -26,6 +26,9 @@ public:
     void SetScreenSize(int, int);
     bool IsLeftArrowPressed();
     bool IsRightArrowPressed();
+    bool IsUpArrowPressed();
+    bool IsDownArrowPressed();
+    bool IsSpacePressed();
 
 private:
     bool ReadKeyboard();
