@@ -1,33 +1,70 @@
 #include "DrivingGame.h"
 #include "MeshBuilder.h"
 
-// Ground: GROUND_CELLS x GROUND_CELLS cells of GROUND_CELL metres, centred on the car.
-static const float GROUND_CELL = 12.0f;
-static const int   GROUND_CELLS = 40;                                   // 480 m square
-static const float GROUND_TILE = 6.0f;                                  // metres per texture repeat (divides GROUND_CELL)
-static const int   GROUND_MAX_VERTICES = GROUND_CELLS * GROUND_CELLS * 6;
+// The road / ground meshes cover [meshStart, meshStart + MESH_LENGTH] along the road, in slices of MESH_STEP metres.
+// meshStart is snapped to MESH_STEP, so the mesh only changes every MESH_STEP metres driven.
+static const float MESH_STEP = 6.0f;
+static const float MESH_BEHIND = 40.0f;
+static const float MESH_LENGTH = 420.0f;
+static const int   MESH_SEGMENTS = 71;                  // MESH_LENGTH / MESH_STEP + 1
+
+// Ground strip beside the road: endless in front, only this wide on the sides.
+static const float GROUND_HALF_WIDTH = 60.0f;
+static const int   GROUND_LATERAL_CELLS = 3;            // small cells keep the per-vertex lighting accurate (see guide 0.B)
+static const float ROAD_TILE = 7.0f;                    // metres per texture repeat
+static const float GROUND_TILE = 12.0f;
+
+static const int ROAD_MAX_VERTICES = MESH_SEGMENTS * 6;
+static const int GROUND_MAX_VERTICES = MESH_SEGMENTS * 6 * GROUND_LATERAL_CELLS * 2;
+
+// Roadside posts: give a sense of speed.
+static const float POST_SPACING = 18.0f;
+static const float POST_OFFSET = ROAD_HALF_WIDTH + 1.2f;
 
 // Car box: cube.txt is 2 x 2 x 2, so these are half extents -> 1.8 m wide, 1.0 m high, 4.0 m long.
 static const float CAR_HALF_WIDTH = 0.9f;
 static const float CAR_HALF_HEIGHT = 0.5f;
 static const float CAR_HALF_LENGTH = 2.0f;
 
-// Follow camera.
+// Follow camera: it follows the ROAD direction (plus a little of the car's nose), not the car's every wiggle.
+// Restart (R): the car is put back on the centre of the road, right where it is, with a push forward.
+static const float RESTART_SPEED = 15.0f;
+
 static const float CAMERA_DISTANCE = 9.0f;
 static const float CAMERA_HEIGHT = 4.5f;
 static const float CAMERA_PITCH_DEGREES = 14.0f;
+static const float CAMERA_YAW_RESPONSE = 5.0f;
+static const float CAMERA_NOSE_FOLLOW = 0.35f;
 
-// Shadow "sun": far away and high so the light direction hardly changes across the screen (see 0.B).
+// Shadow "sun": far away and high so the light direction hardly changes across the screen.
 static const XMFLOAT3 LIGHT_OFFSET = XMFLOAT3(-35.0f, 70.0f, -35.0f);
+
+// World position of the point `lateral` metres to the right of a road point.
+static XMFLOAT3 OffsetFromRoad(const RoadPoint& point, float lateral, float y)
+{
+    return XMFLOAT3(point.x + cosf(point.heading) * lateral, y, point.z - sinf(point.heading) * lateral);
+}
+
+static float WrapAngle(float angle)
+{
+    while(angle > XM_PI)  { angle -= XM_2PI; }
+    while(angle < -XM_PI) { angle += XM_2PI; }
+
+    return angle;
+}
 
 DrivingGame::DrivingGame()
 {
     m_Renderer = nullptr;
     m_Camera = nullptr;
     m_CarModel = nullptr;
+    m_PostModel = nullptr;
+    m_RoadModel = nullptr;
     m_GroundModel = nullptr;
-    m_groundCenterX = 0.0f;
-    m_groundCenterZ = 0.0f;
+    m_meshStart = 0.0f;
+    m_meshBuilt = false;
+    m_cameraYaw = 0.0f;
+    m_restartWasDown = false;
 }
 
 DrivingGame::~DrivingGame()
@@ -38,7 +75,7 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
 {
     char modelFilename[128];
     char textureFilename[128];
-    RenderItem item;
+    RoadPoint point;
     bool result;
 
     m_Renderer = renderer;
@@ -48,9 +85,9 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
 
     m_Camera = new CameraClass;
 
-    // Car model (static, from file).
+    // Car (a squashed cube for now).
     strcpy_s(modelFilename, "Resources/cube.txt");
-    strcpy_s(textureFilename, "Resources/stone01.tga");
+    strcpy_s(textureFilename, "Resources/ice.tga");
 
     m_CarModel = new ModelClass;
 
@@ -61,8 +98,32 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
         return false;
     }
 
-    // Ground model (dynamic, filled by RebuildGround).
+    // Roadside posts.
+    strcpy_s(textureFilename, "Resources/stone01.tga");
+
+    m_PostModel = new ModelClass;
+
+    result = m_PostModel->Initialize(device, context, modelFilename, textureFilename, textureFilename);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the post model object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Road surface (dynamic).
     strcpy_s(textureFilename, "Resources/metal001.tga");
+
+    m_RoadModel = new ModelClass;
+
+    result = m_RoadModel->InitializeDynamic(device, context, ROAD_MAX_VERTICES, textureFilename, textureFilename);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the road model object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Ground on both sides of the road (dynamic).
+    strcpy_s(textureFilename, "_Shader/dirt01.tga");
 
     m_GroundModel = new ModelClass;
 
@@ -73,26 +134,26 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
         return false;
     }
 
-    // Narrow, far shadow light: ~54 m of shadowed area around the car (1024 px -> ~19 px per metre).
+    // Narrow, far shadow light: ~54 m of shadowed area around the car.
     m_Renderer->SetLightProjection(0.6f, 10.0f, 200.0f);
 
-    m_Car.Reset(0.0f, 0.0f, 0.0f);
+    // The car starts on the centre line at the start of the road, facing along it.
+    m_Road.Reset(12345);
+    point = m_Road.GetPoint(0.0f);
+    m_Car.Reset(point.x, point.z, point.heading);
+    m_Road.Update(0.0f);
 
-    // Draw list: slot 0 = ground, slot 1 = car (its matrix changes every frame).
-    item.model = m_GroundModel;
-    XMStoreFloat4x4(&item.world, XMMatrixIdentity());
-    m_Items.push_back(item);
+    m_cameraYaw = point.heading;
 
-    item.model = m_CarModel;
-    XMStoreFloat4x4(&item.world, XMMatrixIdentity());
-    m_Items.push_back(item);
+    m_meshStart = floorf((m_Car.GetS() - MESH_BEHIND) / MESH_STEP) * MESH_STEP;
 
-    if(!RebuildGround(0.0f, 0.0f))
+    if(!RebuildMeshes(m_meshStart))
     {
         return false;
     }
 
-    UpdateCamera();
+    BuildDrawList(m_meshStart);
+    UpdateCamera(1.0f);
     UpdateLight();
 
     return true;
@@ -107,6 +168,20 @@ void DrivingGame::Shutdown()
         m_GroundModel->Shutdown();
         delete m_GroundModel;
         m_GroundModel = nullptr;
+    }
+
+    if(m_RoadModel)
+    {
+        m_RoadModel->Shutdown();
+        delete m_RoadModel;
+        m_RoadModel = nullptr;
+    }
+
+    if(m_PostModel)
+    {
+        m_PostModel->Shutdown();
+        delete m_PostModel;
+        m_PostModel = nullptr;
     }
 
     if(m_CarModel)
@@ -127,44 +202,61 @@ void DrivingGame::Shutdown()
 
 bool DrivingGame::Update(float dt, InputClass* input)
 {
-    XMFLOAT3 position;
-    XMMATRIX world;
-    float throttle, brake, steer, snapX, snapZ;
+    CarControls controls;
+    float meshStart;
 
     // Keys -> car controls.
-    throttle = input->IsKeyDown(DIK_UP) ? 1.0f : 0.0f;
-    brake = input->IsKeyDown(DIK_DOWN) ? 1.0f : 0.0f;
-    steer = 0.0f;
-    if(input->IsKeyDown(DIK_RIGHT)) { steer += 1.0f; }
-    if(input->IsKeyDown(DIK_LEFT))  { steer -= 1.0f; }
+    controls.throttle = input->IsKeyDown(DIK_W) ? 1.0f : 0.0f;
+    controls.brake = input->IsKeyDown(DIK_S) ? 1.0f : 0.0f;
+    controls.handbrake = input->IsKeyDown(DIK_SPACE) ? 1.0f : 0.0f;
+    controls.steer = 0.0f;
+    if(input->IsKeyDown(DIK_D)) { controls.steer += 1.0f; }
+    if(input->IsKeyDown(DIK_A))  { controls.steer -= 1.0f; }
 
-    m_Car.Update(dt, throttle, brake, steer);
-    position = m_Car.GetPosition();
-
-    // Keep the ground under the car, rewriting the mesh only when the car enters a new cell.
-    snapX = floorf(position.x / GROUND_CELL + 0.5f) * GROUND_CELL;
-    snapZ = floorf(position.z / GROUND_CELL + 0.5f) * GROUND_CELL;
-
-    if(snapX != m_groundCenterX || snapZ != m_groundCenterZ)
+    // R: restart. Only on the press, not while the key is held.
+    bool restartDown = input->IsKeyDown(DIK_R);
+    if(restartDown && !m_restartWasDown)
     {
-        if(!RebuildGround(snapX, snapZ))
+        Restart();
+    }
+    m_restartWasDown = restartDown;
+
+    // The road needs to exist ahead of the car before the car looks at it.
+    m_Road.Update(m_Car.GetS());
+
+    m_Car.Update(dt, controls, m_Road);
+
+    // The car has moved on: make sure the road still exists in front of it, then re-place the meshes if needed.
+    m_Road.Update(m_Car.GetS());
+
+    meshStart = floorf((m_Car.GetS() - MESH_BEHIND) / MESH_STEP) * MESH_STEP;
+
+    if(meshStart != m_meshStart)
+    {
+        m_meshStart = meshStart;
+
+        if(!RebuildMeshes(m_meshStart))
         {
             return false;
         }
     }
 
-    // Car world matrix: scale the 2x2x2 cube into a car box, turn it, put it on the ground.
-    // (Row-vector convention: matrices apply left to right.)
-    world = XMMatrixScaling(CAR_HALF_WIDTH, CAR_HALF_HEIGHT, CAR_HALF_LENGTH) *
-            XMMatrixRotationY(m_Car.GetHeading()) *
-            XMMatrixTranslation(position.x, CAR_HALF_HEIGHT, position.z);
-
-    XMStoreFloat4x4(&m_Items[1].world, world);
-
-    UpdateCamera();
+    BuildDrawList(m_meshStart);
+    UpdateCamera(dt);
     UpdateLight();
 
     return true;
+}
+
+void DrivingGame::Restart()
+{
+    RoadPoint point = m_Road.GetPoint(m_Car.GetS());
+
+    // Centre line, facing along the road, already rolling.
+    m_Car.Reset(point.x, point.z, point.heading, RESTART_SPEED, m_Car.GetS());
+
+    // Snap the camera behind the car instead of swinging round to it.
+    m_cameraYaw = point.heading;
 }
 
 bool DrivingGame::Render()
@@ -172,54 +264,140 @@ bool DrivingGame::Render()
     return m_Renderer->RenderScene(m_Camera, m_Items);
 }
 
-bool DrivingGame::RebuildGround(float centerX, float centerZ)
+// Writes the road and ground meshes for the stretch of road starting at meshStart.
+bool DrivingGame::RebuildMeshes(float meshStart)
+{
+    ID3D11DeviceContext* context = m_Renderer->GetDirect3D()->GetDeviceContext();
+
+    m_RoadVertices.clear();
+    m_GroundVertices.clear();
+
+    AddStrip(m_RoadVertices, meshStart, -ROAD_HALF_WIDTH, ROAD_HALF_WIDTH, 1, ROAD_TILE);
+    AddStrip(m_GroundVertices, meshStart, -GROUND_HALF_WIDTH, -ROAD_HALF_WIDTH, GROUND_LATERAL_CELLS, GROUND_TILE);
+    AddStrip(m_GroundVertices, meshStart, ROAD_HALF_WIDTH, GROUND_HALF_WIDTH, GROUND_LATERAL_CELLS, GROUND_TILE);
+
+    m_meshBuilt = true;
+
+    if(!m_RoadModel->UpdateMesh(context, m_RoadVertices.data(), (int)m_RoadVertices.size()))
+    {
+        return false;
+    }
+
+    return m_GroundModel->UpdateMesh(context, m_GroundVertices.data(), (int)m_GroundVertices.size());
+}
+
+// One band of the road, from lateralA to lateralB metres right of the centre line, split into lateralCells cells.
+void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float meshStart, float lateralA, float lateralB, int lateralCells, float tile)
 {
     XMFLOAT3 p[4];
     XMFLOAT2 uv[4];
-    float x0, x1, z0, z1;
-    int ix, iz;
+    RoadPoint a, b;
+    float s0, s1, l0, l1, uvBase;
+    int segment, cell;
 
-    m_GroundVertices.clear();
+    // Texture coordinates are measured from a multiple of the tile length, so the pattern stays glued to the road
+    // while meshStart moves along.
+    uvBase = floorf(meshStart / tile) * tile;
 
-    for(iz=0; iz<GROUND_CELLS; iz++)
+    for(segment=0; segment<MESH_SEGMENTS; segment++)
     {
-        for(ix=0; ix<GROUND_CELLS; ix++)
+        s0 = meshStart + segment * MESH_STEP;
+        s1 = s0 + MESH_STEP;
+
+        a = m_Road.GetPoint(s0);
+        b = m_Road.GetPoint(s1);
+
+        for(cell=0; cell<lateralCells; cell++)
         {
-            x0 = centerX + (ix - GROUND_CELLS / 2) * GROUND_CELL;
-            x1 = x0 + GROUND_CELL;
-            z0 = centerZ + (iz - GROUND_CELLS / 2) * GROUND_CELL;
-            z1 = z0 + GROUND_CELL;
+            l0 = lateralA + (lateralB - lateralA) * (float)cell / (float)lateralCells;
+            l1 = lateralA + (lateralB - lateralA) * (float)(cell + 1) / (float)lateralCells;
 
-            p[0] = XMFLOAT3(x0, 0.0f, z0);
-            p[1] = XMFLOAT3(x0, 0.0f, z1);
-            p[2] = XMFLOAT3(x1, 0.0f, z1);
-            p[3] = XMFLOAT3(x1, 0.0f, z0);
+            p[0] = OffsetFromRoad(a, l0, 0.0f);
+            p[1] = OffsetFromRoad(a, l1, 0.0f);
+            p[2] = OffsetFromRoad(b, l1, 0.0f);
+            p[3] = OffsetFromRoad(b, l0, 0.0f);
 
-            // uv measured from the grid centre (a multiple of GROUND_TILE) -> pattern stays fixed in the world.
-            uv[0] = XMFLOAT2((x0 - centerX) / GROUND_TILE, (z0 - centerZ) / GROUND_TILE);
-            uv[1] = XMFLOAT2((x0 - centerX) / GROUND_TILE, (z1 - centerZ) / GROUND_TILE);
-            uv[2] = XMFLOAT2((x1 - centerX) / GROUND_TILE, (z1 - centerZ) / GROUND_TILE);
-            uv[3] = XMFLOAT2((x1 - centerX) / GROUND_TILE, (z0 - centerZ) / GROUND_TILE);
+            uv[0] = XMFLOAT2(l0 / tile, (s0 - uvBase) / tile);
+            uv[1] = XMFLOAT2(l1 / tile, (s0 - uvBase) / tile);
+            uv[2] = XMFLOAT2(l1 / tile, (s1 - uvBase) / tile);
+            uv[3] = XMFLOAT2(l0 / tile, (s1 - uvBase) / tile);
 
-            MeshBuilder::AddQuad(m_GroundVertices, p, uv, XMFLOAT3(0.0f, 1.0f, 0.0f));
+            MeshBuilder::AddQuad(vertices, p, uv, XMFLOAT3(0.0f, 1.0f, 0.0f));
         }
     }
-
-    m_groundCenterX = centerX;
-    m_groundCenterZ = centerZ;
-
-    return m_GroundModel->UpdateMesh(m_Renderer->GetDirect3D()->GetDeviceContext(), m_GroundVertices.data(), (int)m_GroundVertices.size());
 }
 
-void DrivingGame::UpdateCamera()
+// Everything that is drawn this frame: road, ground, the car and the roadside posts.
+void DrivingGame::BuildDrawList(float meshStart)
 {
-    XMFLOAT3 position = m_Car.GetPosition();
-    XMFLOAT3 forward = m_Car.GetForward();
-    float headingDegrees = m_Car.GetHeading() * (180.0f / XM_PI);
+    RenderItem item;
+    RoadPoint point;
+    XMFLOAT3 position;
+    XMMATRIX world;
+    float s, firstPost;
+    int side;
 
-    // Behind and above the car, looking the way the car faces, tilted slightly down.
-    m_Camera->SetPosition(position.x - forward.x * CAMERA_DISTANCE, CAMERA_HEIGHT, position.z - forward.z * CAMERA_DISTANCE);
-    m_Camera->SetRotation(CAMERA_PITCH_DEGREES, headingDegrees, 0.0f);
+    m_Items.clear();
+
+    item.model = m_RoadModel;
+    XMStoreFloat4x4(&item.world, XMMatrixIdentity());
+    m_Items.push_back(item);
+
+    item.model = m_GroundModel;
+    m_Items.push_back(item);
+
+    // Car: wherever the physics put it, facing the way the physics turned it.
+    position = m_Car.GetPosition();
+
+    world = XMMatrixScaling(CAR_HALF_WIDTH, CAR_HALF_HEIGHT, CAR_HALF_LENGTH) *
+            XMMatrixRotationY(m_Car.GetHeading()) *
+            XMMatrixTranslation(position.x, CAR_HALF_HEIGHT, position.z);
+
+    item.model = m_CarModel;
+    XMStoreFloat4x4(&item.world, world);
+    m_Items.push_back(item);
+
+    // Posts on both sides, at fixed distances along the road.
+    firstPost = ceilf(meshStart / POST_SPACING) * POST_SPACING;
+
+    for(s=firstPost; s<meshStart + MESH_LENGTH; s+=POST_SPACING)
+    {
+        point = m_Road.GetPoint(s);
+
+        for(side=-1; side<=1; side+=2)
+        {
+            position = OffsetFromRoad(point, (float)side * POST_OFFSET, 0.7f);
+
+            world = XMMatrixScaling(0.15f, 0.7f, 0.15f) *
+                    XMMatrixRotationY(point.heading) *
+                    XMMatrixTranslation(position.x, position.y, position.z);
+
+            item.model = m_PostModel;
+            XMStoreFloat4x4(&item.world, world);
+            m_Items.push_back(item);
+        }
+    }
+}
+
+void DrivingGame::UpdateCamera(float dt)
+{
+    RoadPoint point = m_Road.GetPoint(m_Car.GetS());
+    XMFLOAT3 position = m_Car.GetPosition();
+    float targetYaw, blend;
+
+    // Look along the road, with a little of the car's nose so a slide swings the view.
+    targetYaw = point.heading + WrapAngle(m_Car.GetHeading() - point.heading) * CAMERA_NOSE_FOLLOW;
+
+    blend = CAMERA_YAW_RESPONSE * dt;
+    if(blend > 1.0f)
+    {
+        blend = 1.0f;
+    }
+
+    m_cameraYaw += WrapAngle(targetYaw - m_cameraYaw) * blend;
+
+    m_Camera->SetPosition(position.x - sinf(m_cameraYaw) * CAMERA_DISTANCE, CAMERA_HEIGHT, position.z - cosf(m_cameraYaw) * CAMERA_DISTANCE);
+    m_Camera->SetRotation(CAMERA_PITCH_DEGREES, m_cameraYaw * (180.0f / XM_PI), 0.0f);
 }
 
 void DrivingGame::UpdateLight()

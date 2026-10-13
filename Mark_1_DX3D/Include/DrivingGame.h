@@ -5,7 +5,9 @@
 #include "CameraClass.h"
 #include "ModelClass.h"
 #include "Car.h"
+#include "Road.h"
 
+// Drift Horizon: an endless winding road, a car that steers across it and slides in the bends.
 class DrivingGame : public Game
 {
 public:
@@ -18,18 +20,30 @@ public:
     bool Render() override;
 
 private:
-    bool RebuildGround(float centerX, float centerZ);
-    void UpdateCamera();
+    bool RebuildMeshes(float meshStart);
+    void AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float meshStart, float lateralA, float lateralB, int lateralCells, float tile);
+    void BuildDrawList(float meshStart);
+    void Restart();
+    void UpdateCamera(float dt);
     void UpdateLight();
 
 private:
     RendererClass* m_Renderer;          // not owned
     CameraClass* m_Camera;
     ModelClass* m_CarModel;
+    ModelClass* m_PostModel;
+    ModelClass* m_RoadModel;
     ModelClass* m_GroundModel;
+
+    Road m_Road;
     Car m_Car;
 
-    std::vector<RenderItem> m_Items;    // [0] = ground, [1] = car
+    std::vector<RenderItem> m_Items;
+    std::vector<ModelClass::MeshVertex> m_RoadVertices;
     std::vector<ModelClass::MeshVertex> m_GroundVertices;
-    float m_groundCenterX, m_groundCenterZ;
+
+    float m_meshStart;                  // road distance where the current road / ground meshes begin
+    bool m_meshBuilt;
+    float m_cameraYaw;                  // radians, smoothed
+    bool m_restartWasDown;              // R key state last frame, so one press = one restart
 };
