@@ -6,6 +6,7 @@
 #include "ModelClass.h"
 #include "Car.h"
 #include "Road.h"
+#include "DriftScore.h"
 
 // Drift Horizon: an endless winding road, a car that steers across it and slides in the bends.
 class DrivingGame : public Game
@@ -18,6 +19,7 @@ public:
     void Shutdown() override;
     bool Update(float dt, InputClass* input) override;
     bool Render() override;
+    bool GetHudLine(int index, char* text, int size) override;
 
 private:
     bool RebuildMeshes(float meshStart);
@@ -38,6 +40,7 @@ private:
 
     Road m_Road;
     Car m_Car;
+    DriftScore m_Score;
 
     std::vector<RenderItem> m_Items;
     std::vector<ModelClass::MeshVertex> m_RoadVertices;

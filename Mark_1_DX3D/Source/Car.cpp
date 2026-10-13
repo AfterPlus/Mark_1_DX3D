@@ -11,14 +11,37 @@ static const float AXLE_OFFSET = 1.3f;              // distance of each axle fro
 static const float GRAVITY = 9.81f;
 
 // Engine / brakes / resistance.
-static const float ENGINE_POWER = 160000.0f;        // W: force = power / speed, so acceleration falls off as you go faster
-static const float ENGINE_MAX_FORCE = 5500.0f;      // N: wheel-spin limit at low speed
+static const float ENGINE_MAX_FORCE = 5500.0f;      // N: traction-control limit at the driven wheels (wheel-spin limit at low speed)
 static const float TOP_SPEED = 55.0f;               // m/s: engine cuts out above this
 static const float BRAKE_FORCE = 11000.0f;          // N, split between the axles
 static const float BRAKE_FRONT_SHARE = 0.65f;
 static const float HANDBRAKE_FORCE = 2000.0f;       // N, rear axle only
 static const float AIR_DRAG = 0.9f;                 // N per (m/s)^2
 static const float ROLLING_RESISTANCE = 180.0f;     // N
+
+// Drivetrain, built like PhysX's vehicle SDK builds it: engine torque curve -> gearbox -> final drive -> wheels,
+// with an automatic gearbox that shifts on engine speed. (Tuned so acceleration matches the old flat power curve.)
+static const float ENGINE_IDLE_RPM = 1000.0f;
+static const float ENGINE_MAX_RPM = 7000.0f;
+static const float ENGINE_PEAK_TORQUE = 365.0f;     // N*m
+static const float ENGINE_LAUNCH_RPM = 2800.0f;     // clutch slip: from a standstill the engine runs at least this fast on the throttle
+static const int   GEAR_COUNT = 6;
+static const float GEAR_RATIOS[GEAR_COUNT] = { 3.6f, 2.2f, 1.55f, 1.15f, 0.92f, 0.76f };
+static const float FINAL_RATIO = 3.9f;
+static const float DRIVETRAIN_EFFICIENCY = 0.9f;
+static const float WHEEL_RADIUS = 0.32f;
+static const float SHIFT_UP_RPM = 6000.0f;
+static const float SHIFT_DOWN_RPM = 2400.0f;
+static const float SHIFT_TIME = 0.18f;              // s with no torque while the gear changes
+static const float SHIFT_LATENCY = 0.5f;            // s before the next change is allowed (stops hunting between gears)
+static const float RPM_RESPONSE = 15.0f;            // 1/s, how quickly the engine speed follows the wheels
+
+// Weight transfer: accelerating loads the rear axle, braking loads the front. That is what makes the rear step out when you
+// lift off in a corner and what gives you traction on the throttle. (PhysX gets this from its suspension; here it is computed.)
+static const float CG_HEIGHT = 0.5f;                // m
+static const float WEIGHT_TRANSFER_SCALE = 0.7f;    // < 1: arcade-friendly, a real car with this height would transfer more
+static const float LONG_ACCEL_RESPONSE = 10.0f;     // 1/s, smoothing of the acceleration used for the transfer
+static const float LOAD_SENSITIVITY = 0.12f;        // grip per unit load falls a little as the load rises (PhysX's saturating lateral stiffness)
 
 // Tyres. Friction coefficients above 1 are normal for road tyres. MORE GRIP = HIGHER VALUES.
 static const float FRICTION_FRONT = 1.3f;           // front a little below the rear: when you ask too much the FRONT slides first (safe understeer)
@@ -80,6 +103,12 @@ Car::Car()
     m_d = 0.0f;
     m_offRoad = false;
     m_accumulator = 0.0f;
+    m_rpm = ENGINE_IDLE_RPM;
+    m_gear = 1;
+    m_shiftTimer = 0.0f;
+    m_gearTimer = 0.0f;
+    m_longAccel = 0.0f;
+    m_wallHit = false;
 
     Reset(0.0f, 0.0f, 0.0f);
 }
@@ -100,6 +129,18 @@ void Car::Reset(float x, float z, float heading, float speed, float s)
     m_d = 0.0f;
     m_offRoad = false;
     m_accumulator = 0.0f;
+    m_rpm = ENGINE_IDLE_RPM;
+    m_shiftTimer = 0.0f;
+    m_gearTimer = 0.0f;
+    m_longAccel = 0.0f;
+    m_wallHit = false;
+
+    // Start in the lowest gear that keeps the engine under 5000 rpm at the starting speed.
+    m_gear = 1;
+    while(m_gear < GEAR_COUNT && speed / WHEEL_RADIUS * GEAR_RATIOS[m_gear - 1] * FINAL_RATIO * 9.5493f > 5000.0f)
+    {
+        m_gear++;
+    }
 
     ReadState();
 }
@@ -153,9 +194,99 @@ void Car::ReadState()
     m_slipAngle = atan2f(sideways, fabsf(m_forwardSpeed) + SLIP_SPEED_SMOOTHING);
 }
 
+// Engine torque at a given fraction of maximum engine speed (a normalised curve, like PhysX's torque curve).
+static float EngineTorqueCurve(float rpmFraction)
+{
+    static const float points[7][2] = { {0.00f, 0.35f}, {0.14f, 0.55f}, {0.30f, 0.80f}, {0.50f, 1.00f}, {0.70f, 0.97f}, {0.85f, 0.85f}, {1.00f, 0.60f} };
+    int i;
+
+    if(rpmFraction <= points[0][0]) { return points[0][1]; }
+
+    for(i=1; i<7; i++)
+    {
+        if(rpmFraction <= points[i][0])
+        {
+            float t = (rpmFraction - points[i - 1][0]) / (points[i][0] - points[i - 1][0]);
+            return points[i - 1][1] + (points[i][1] - points[i - 1][1]) * t;
+        }
+    }
+
+    return points[6][1];
+}
+
+// Engine speed follows the wheels through the current gear; the automatic gearbox shifts up / down on engine speed;
+// the force at the driven wheels is torque * total ratio * efficiency / wheel radius, capped by traction control.
+float Car::UpdateDrivetrain(float throttle, float forwardSpeed)
+{
+    float ratio, wheelRpm, engineRpm, torque, force;
+
+    ratio = GEAR_RATIOS[m_gear - 1] * FINAL_RATIO;
+    wheelRpm = fmaxf(forwardSpeed, 0.0f) / WHEEL_RADIUS * ratio * 9.5493f;      // rad/s -> rpm
+
+    // Slipping clutch at a standstill: the engine is allowed to run faster than the wheels would turn it.
+    engineRpm = wheelRpm;
+    if(throttle > 0.0f && engineRpm < ENGINE_LAUNCH_RPM)
+    {
+        engineRpm = ENGINE_LAUNCH_RPM;
+    }
+
+    engineRpm = fmaxf(ENGINE_IDLE_RPM, fminf(ENGINE_MAX_RPM, engineRpm));
+    m_rpm += (engineRpm - m_rpm) * fminf(1.0f, RPM_RESPONSE * FIXED_DT);
+
+    // Automatic gearbox.
+    m_gearTimer += FIXED_DT;
+
+    if(m_shiftTimer > 0.0f)
+    {
+        m_shiftTimer -= FIXED_DT;
+    }
+    else if(m_gearTimer > SHIFT_LATENCY)
+    {
+        if(m_rpm > SHIFT_UP_RPM && m_gear < GEAR_COUNT)
+        {
+            m_gear++;
+            m_shiftTimer = SHIFT_TIME;
+            m_gearTimer = 0.0f;
+        }
+        else if(m_rpm < SHIFT_DOWN_RPM && m_gear > 1 && forwardSpeed > 3.0f)
+        {
+            m_gear--;
+            m_shiftTimer = SHIFT_TIME;
+            m_gearTimer = 0.0f;
+        }
+    }
+
+    // No torque while shifting, off the throttle, at the rev limiter or above top speed.
+    if(throttle <= 0.0f || m_shiftTimer > 0.0f || m_rpm >= ENGINE_MAX_RPM * 0.98f || forwardSpeed >= TOP_SPEED)
+    {
+        return 0.0f;
+    }
+
+    torque = throttle * ENGINE_PEAK_TORQUE * EngineTorqueCurve(m_rpm / ENGINE_MAX_RPM);
+    force = torque * ratio * DRIVETRAIN_EFFICIENCY / WHEEL_RADIUS;
+
+    return fminf(force, ENGINE_MAX_FORCE);
+}
+
+// Linear bicycle-model analysis of the tyre settings (Riekert & Schunck, the model in the bicycle_model reference):
+// cornering stiffness c = d(force)/d(slip angle) at zero slip = shape * stiffness * friction * load.
+// Understeer gradient K = (m / L) * (b / c_front - a / c_rear) with a = b = the axle distances from the centre of mass.
+// Characteristic speed = sqrt(L / K): the speed at which the steering response is twice that of a neutral car.
+void Car::GetHandlingBalance(float& understeerGradient, float& characteristicSpeed)
+{
+    float load = MASS * GRAVITY * 0.5f;
+    float cFront = TYRE_SHAPE * TYRE_STIFFNESS * FRICTION_FRONT * load;
+    float cRear = TYRE_SHAPE * TYRE_STIFFNESS * FRICTION_REAR * load;
+    float wheelBase = 2.0f * AXLE_OFFSET;
+
+    understeerGradient = (MASS / wheelBase) * (AXLE_OFFSET / cFront - AXLE_OFFSET / cRear);
+    characteristicSpeed = (understeerGradient > 1e-9f) ? sqrtf(wheelBase / understeerGradient) : 1e9f;
+}
+
 void Car::Step(const CarControls& controls)
 {
     float blend, lock, speed, driveForce, brakeForce, handbrakeForce, surface, frontFriction, rearFriction, brakeSign, rolling;
+    float staticLoad, transfer, frontLoad, rearLoad;
     v3df drag;
 
     ReadState();
@@ -177,18 +308,8 @@ void Car::Step(const CarControls& controls)
     lock = fmaxf(lock, DRIFT_STEER_GAIN * fabsf(m_slipAngle));
     m_steerAngle = m_steer * fminf(STEER_MAX_ANGLE, lock);
 
-    // 2. Engine pushes the rear axle.
-    driveForce = 0.0f;
-    if(controls.throttle > 0.0f && m_forwardSpeed < TOP_SPEED)
-    {
-        driveForce = ENGINE_POWER / fmaxf(m_forwardSpeed, 4.0f);
-        if(driveForce > ENGINE_MAX_FORCE)
-        {
-            driveForce = ENGINE_MAX_FORCE;
-        }
-
-        driveForce *= controls.throttle;
-    }
+    // 2. Engine -> gearbox -> wheels: pushes the rear axle.
+    driveForce = UpdateDrivetrain(controls.throttle, m_forwardSpeed);
 
     // 3. Brakes oppose the motion of the wheel; the clamp stops them from jittering around standstill.
     brakeSign = -fmaxf(-1.0f, fminf(1.0f, m_forwardSpeed));
@@ -202,11 +323,23 @@ void Car::Step(const CarControls& controls)
         rearFriction *= HANDBRAKE_REAR_FRICTION_SCALE;      // locked rear wheels grip far less sideways
     }
 
-    // 4. Each axle carries half the weight and turns its slip into a force.
-    ApplyTyre(AXLE_OFFSET, m_heading + m_steerAngle, brakeForce * BRAKE_FRONT_SHARE, frontFriction, MASS * GRAVITY * 0.5f);
-    ApplyTyre(-AXLE_OFFSET, m_heading, driveForce + brakeForce * (1.0f - BRAKE_FRONT_SHARE) + handbrakeForce, rearFriction, MASS * GRAVITY * 0.5f);
+    // 4. Weight transfer. At rest each axle carries half the weight; accelerating moves load to the rear axle, braking to the
+    //    front (transfer = m * a * h / wheelbase). More load = more grip force, but a bit less grip per unit of load.
+    m_longAccel += (m_body->GetLastFrameAcceleration().dot(m_forward) - m_longAccel) * fminf(1.0f, LONG_ACCEL_RESPONSE * FIXED_DT);
 
-    // 5. Air drag and rolling resistance (grass is much stickier than tarmac).
+    staticLoad = MASS * GRAVITY * 0.5f;
+    transfer = MASS * m_longAccel * CG_HEIGHT / (2.0f * AXLE_OFFSET) * WEIGHT_TRANSFER_SCALE;
+    frontLoad = fmaxf(0.25f * staticLoad, staticLoad - transfer);
+    rearLoad = fmaxf(0.25f * staticLoad, staticLoad + transfer);
+
+    frontFriction *= powf(frontLoad / staticLoad, -LOAD_SENSITIVITY);
+    rearFriction *= powf(rearLoad / staticLoad, -LOAD_SENSITIVITY);
+
+    // 5. Each axle turns its slip into a force.
+    ApplyTyre(AXLE_OFFSET, m_heading + m_steerAngle, brakeForce * BRAKE_FRONT_SHARE, frontFriction, frontLoad);
+    ApplyTyre(-AXLE_OFFSET, m_heading, driveForce + brakeForce * (1.0f - BRAKE_FRONT_SHARE) + handbrakeForce, rearFriction, rearLoad);
+
+    // 6. Air drag and rolling resistance (grass is much stickier than tarmac).
     rolling = ROLLING_RESISTANCE * (m_offRoad ? OFFROAD_ROLLING_SCALE : 1.0f);
     drag = m_velocity * (-AIR_DRAG * speed);
     if(speed > 0.01f)
@@ -216,7 +349,7 @@ void Car::Step(const CarControls& controls)
 
     m_body->AddForce(drag);
 
-    // 6. Let the Physics module integrate force -> acceleration -> velocity -> position / orientation.
+    // 7. Let the Physics module integrate force -> acceleration -> velocity -> position / orientation.
     m_body->Update(FIXED_DT);
 
     // The ground is flat and the forces are all horizontal, so keep the body on the plane.
@@ -311,6 +444,7 @@ void Car::ApplyWalls(const Road& road)
     if((m_d > 0.0f && normalSpeed > 0.0f) || (m_d < 0.0f && normalSpeed < 0.0f))
     {
         velocity.AddScaledVector(right, -(1.0f + WALL_RESTITUTION) * normalSpeed);
+        m_wallHit = true;
         velocity *= WALL_SCRUB;
         m_body->SetVelocity(velocity);
     }

@@ -41,11 +41,25 @@ public:
     float GetD() const { return m_d; }                          // sideways offset from the road centre (+ = right)
     bool IsOffRoad() const { return m_offRoad; }
 
+    // Powertrain read-outs (HUD / engine sound later).
+    float GetRpm() const { return m_rpm; }
+    int GetGear() const { return m_gear; }                      // 1..6
+    float GetLongitudinalAccel() const { return m_longAccel; }  // m/s^2 along the nose, smoothed (+ = accelerating)
+
+    // True once after the car bounced off a wall (the game uses it to end a drift chain).
+    bool ConsumeWallHit() { bool hit = m_wallHit; m_wallHit = false; return hit; }
+
+    // Bicycle-model handling balance of the tuning in Car.cpp (static, no car needed): the understeer gradient K in
+    // rad per (m/s^2) of lateral acceleration (> 0 understeer, < 0 oversteer) and the speed at which steering response
+    // doubles ('characteristic speed', infinite for a neutral car).
+    static void GetHandlingBalance(float& understeerGradient, float& characteristicSpeed);
+
 private:
     void Step(const CarControls& controls);
     void ApplyTyre(float offsetZ, float wheelAngle, float requestedForce, float friction, float load);
     void ApplyWalls(const Road& road);
     void ReadState();
+    float UpdateDrivetrain(float throttle, float forwardSpeed);
 
 private:
     std::shared_ptr<Physics::Transform> m_transform;
@@ -64,4 +78,14 @@ private:
     float m_s, m_d;
     bool m_offRoad;
     float m_accumulator;    // leftover time for the fixed-step physics
+
+    // Powertrain.
+    float m_rpm;
+    int m_gear;
+    float m_shiftTimer;     // > 0 while changing gear (no torque reaches the wheels)
+    float m_gearTimer;      // time since the last gear change
+
+    // Weight transfer.
+    float m_longAccel;      // smoothed acceleration along the nose
+    bool m_wallHit;
 };

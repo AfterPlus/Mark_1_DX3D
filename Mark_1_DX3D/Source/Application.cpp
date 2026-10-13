@@ -130,6 +130,17 @@ bool Application::Frame(InputClass* Input)
         return false;
     }
 
+    // Whatever text the game wants on the HUD this frame.
+    for(int line=0; line<3; line++)
+    {
+        char text[32];
+
+        if(m_Game->GetHudLine(line, text, sizeof(text)))
+        {
+            m_Hud->SetMessage(line, text);
+        }
+    }
+
     result = m_Hud->Render();
     if(!result)
     {

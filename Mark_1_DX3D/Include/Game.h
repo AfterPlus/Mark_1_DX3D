@@ -20,6 +20,9 @@ public:
 
     // Build the list of RenderItems and call renderer->RenderScene(...).
     virtual bool Render() = 0;
+
+    // Text for the HUD's info widget: line 0, 1 or 2 (at most size-1 characters). Return false to leave the line as it is.
+    virtual bool GetHudLine(int index, char* text, int size) { return false; }
 };
 
 // Implemented by the game, not by the engine. Application calls it once at start-up to get the game to run.

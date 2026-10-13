@@ -249,6 +249,13 @@ bool DrivingGame::Update(float dt, InputClass* input)
 
     m_Car.Update(dt, controls, m_Road);
 
+    // Drift score: the slide angle of the car, its speed, and whether it hit a wall.
+    m_Score.Update(dt, m_Car.GetSlipAngle(), m_Car.GetSpeed(), !m_Car.IsOffRoad());
+    if(m_Car.ConsumeWallHit())
+    {
+        m_Score.Crash();
+    }
+
     // The car has moved on: make sure the road still exists in front of it, then re-place the meshes if needed.
     m_Road.Update(m_Car.GetS());
 
@@ -275,11 +282,48 @@ void DrivingGame::Restart()
 {
     RoadPoint point = m_Road.GetPoint(m_Car.GetS());
 
+    // A restart loses the drift chain that was running (the banked total stays).
+    m_Score.Crash();
+
     // Centre line, facing along the road, already rolling.
     m_Car.Reset(point.x, point.z, point.heading, RESTART_SPEED, m_Car.GetS());
 
     // Snap the camera behind the car instead of swinging round to it.
     m_cameraYaw = point.heading;
+}
+
+bool DrivingGame::GetHudLine(int index, char* text, int size)
+{
+    switch(index)
+    {
+        case 0:
+        {
+            sprintf_s(text, size, "Speed %d km/h  G%d", (int)(m_Car.GetSpeed() * 3.6f + 0.5f), m_Car.GetGear());
+            return true;
+        }
+
+        case 1:
+        {
+            if(m_Score.IsChainActive())
+            {
+                sprintf_s(text, size, "Drift %d x%.1f", m_Score.GetChain(), m_Score.GetMultiplier());
+            }
+            else
+            {
+                sprintf_s(text, size, "Drift -");
+            }
+
+            return true;
+        }
+
+        case 2:
+        {
+            sprintf_s(text, size, "Score %d", m_Score.GetTotal());
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool DrivingGame::Render()
