@@ -1,5 +1,4 @@
 #include "Application.h"
-#include "DemoGame.h"   // the only place that names the concrete game
 
 Application::Application()
 {
@@ -49,7 +48,7 @@ bool Application::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     }
 
     // Then the game. Swapping the game later is a one-line change right here.
-    m_Game = new DemoGame;
+    m_Game = CreateGame();
 
     result = m_Game->Initialize(m_Renderer, hwnd);
     if(!result)

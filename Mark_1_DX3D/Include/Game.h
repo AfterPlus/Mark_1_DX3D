@@ -21,3 +21,7 @@ public:
     // Build the list of RenderItems and call renderer->RenderScene(...).
     virtual bool Render() = 0;
 };
+
+// Implemented by the game, not by the engine. Application calls it once at start-up to get the game to run.
+// Exactly one definition must exist in the project (see GameEntry.cpp).
+Game* CreateGame();

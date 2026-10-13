@@ -117,28 +117,9 @@ bool InputClass::IsRightArrowPressed()
     return false;
 }
 
-bool InputClass::IsUpArrowPressed()
+bool InputClass::IsKeyDown(unsigned char dikCode)
 {
-    if(m_keyboardState[DIK_UP] & 0x80)
-        return true;
-
-    return false;
-}
-
-bool InputClass::IsDownArrowPressed()
-{
-    if(m_keyboardState[DIK_DOWN] & 0x80)
-        return true;
-
-    return false;
-}
-
-bool InputClass::IsSpacePressed()
-{
-    if(m_keyboardState[DIK_SPACE] & 0x80)
-        return true;
-
-    return false;
+    return (m_keyboardState[dikCode] & 0x80) != 0;
 }
 
 void InputClass::Shutdown()

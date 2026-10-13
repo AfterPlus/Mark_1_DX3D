@@ -40,6 +40,7 @@ public:
     // Moves the shadow-casting light and re-aims it. The game calls this
     // (later: every frame so the shadow follows the car).
     void SetLight(XMFLOAT3 position, XMFLOAT3 lookAt);
+    void SetLightProjection(float fieldOfView, float nearPlane, float farPlane);
 
     // Shadow passes + the lit scene pass. Calls BeginScene. Does NOT present,
     // so the HUD can still draw on top before EndFrame().

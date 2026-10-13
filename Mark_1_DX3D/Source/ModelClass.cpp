@@ -4,8 +4,12 @@ ModelClass::ModelClass()
 {
     m_vertexBuffer = nullptr;
     m_indexBuffer = nullptr;
-	m_Textures = nullptr;
-	m_model = nullptr;
+    m_Textures = nullptr;
+    m_model = nullptr;
+    m_vertexCount = 0;
+    m_indexCount = 0;
+    m_dynamic = false;
+    m_maxVertices = 0;
 }
 
 ModelClass::~ModelClass()
@@ -36,6 +40,82 @@ bool ModelClass::Initialize(ID3D11Device* device, ID3D11DeviceContext* deviceCon
 	
 	if (!result)
 		return false;
+
+	return true;
+}
+
+bool ModelClass::InitializeDynamic(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int maxVertices, char* textureFilename1, char* textureFilename2, char* textureFilename3)
+{
+	bool result;
+
+	m_dynamic = true;
+	m_maxVertices = maxVertices;
+
+	// InitializeBuffers sizes both buffers from these counts, so set them to the maximum first.
+	m_vertexCount = maxVertices;
+	m_indexCount = maxVertices;
+
+	m_model = new ModelType[maxVertices];
+	ZeroMemory(m_model, sizeof(ModelType) * maxVertices);
+
+	result = InitializeBuffers(device);
+	if(!result)
+	{
+		return false;
+	}
+
+	// Nothing to draw until the first UpdateMesh.
+	m_vertexCount = 0;
+	m_indexCount = 0;
+
+	return LoadTexture(device, deviceContext, textureFilename1, textureFilename2, textureFilename3);
+}
+
+bool ModelClass::UpdateMesh(ID3D11DeviceContext* deviceContext, const MeshVertex* vertices, int vertexCount)
+{
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	VertexType* dst;
+	HRESULT result;
+	int i;
+
+	// Only dynamic models, only whole triangles, never more than the buffer holds.
+	if(!m_dynamic || vertexCount > m_maxVertices || (vertexCount % 3) != 0)
+	{
+		return false;
+	}
+
+	// Copy into the CPU-side model array, then let the existing code compute tangents / binormals.
+	for(i=0; i<vertexCount; i++)
+	{
+		m_model[i].x  = vertices[i].x;   m_model[i].y  = vertices[i].y;   m_model[i].z  = vertices[i].z;
+		m_model[i].tu = vertices[i].tu;  m_model[i].tv = vertices[i].tv;
+		m_model[i].nx = vertices[i].nx;  m_model[i].ny = vertices[i].ny;  m_model[i].nz = vertices[i].nz;
+	}
+
+	m_vertexCount = vertexCount;
+	m_indexCount = vertexCount;
+
+	CalculateModelVectors();
+
+	// WRITE_DISCARD: "I will overwrite the whole buffer" - the GPU keeps using the old contents for frames in flight.
+	result = deviceContext->Map(m_vertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+	if(FAILED(result))
+	{
+		return false;
+	}
+
+	dst = (VertexType*)mapped.pData;
+
+	for(i=0; i<vertexCount; i++)
+	{
+		dst[i].position = XMFLOAT4(m_model[i].x, m_model[i].y, m_model[i].z, 1.0f);
+		dst[i].texture = XMFLOAT2(m_model[i].tu, m_model[i].tv);
+		dst[i].normal = XMFLOAT3(m_model[i].nx, m_model[i].ny, m_model[i].nz);
+		dst[i].tangent = XMFLOAT3(m_model[i].tx, m_model[i].ty, m_model[i].tz);
+		dst[i].binormal = XMFLOAT3(m_model[i].bx, m_model[i].by, m_model[i].bz);
+	}
+
+	deviceContext->Unmap(m_vertexBuffer, 0);
 
 	return true;
 }
@@ -102,10 +182,10 @@ bool ModelClass::InitializeBuffers(ID3D11Device* device)
 	}
 
 	// Set up the description of the static vertex buffer.
-	vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+	vertexBufferDesc.Usage = m_dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_DEFAULT;
 	vertexBufferDesc.ByteWidth = sizeof(VertexType) * m_vertexCount;
 	vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-	vertexBufferDesc.CPUAccessFlags = 0;
+	vertexBufferDesc.CPUAccessFlags = m_dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
 	vertexBufferDesc.MiscFlags = 0;
 	vertexBufferDesc.StructureByteStride = 0;
 

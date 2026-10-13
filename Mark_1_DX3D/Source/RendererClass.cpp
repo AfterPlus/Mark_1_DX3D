@@ -177,6 +177,12 @@ void RendererClass::SetLight(XMFLOAT3 position, XMFLOAT3 lookAt)
     m_ProjectionLight->SetPosition(position.x, position.y, position.z);
 }
 
+void RendererClass::SetLightProjection(float fieldOfView, float nearPlane, float farPlane)
+{
+    m_ViewPoint->SetProjectionParameters(fieldOfView, 1.0f, nearPlane, farPlane);
+    m_ViewPoint->GenerateProjectionMatrix();
+}
+
 // Old Application::Render (the 3D half).
 bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderItem>& items)
 {

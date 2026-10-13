@@ -44,10 +44,20 @@ private:
     };
 
 public:
+    // A vertex as game code writes it (position, uv, normal). Tangent/binormal are computed for you.
+    struct MeshVertex
+    {
+        float x, y, z;
+        float tu, tv;
+        float nx, ny, nz;
+    };
+
     ModelClass();
     ~ModelClass();
 
     bool Initialize(ID3D11Device*, ID3D11DeviceContext*, char*, char*, char*, char* = nullptr);
+    bool InitializeDynamic(ID3D11Device*, ID3D11DeviceContext*, int maxVertices, char* textureFilename1, char* textureFilename2, char* textureFilename3 = nullptr);
+    bool UpdateMesh(ID3D11DeviceContext*, const MeshVertex*, int vertexCount);
     void Shutdown();
     void Render(ID3D11DeviceContext*);
 
@@ -72,6 +82,8 @@ private:
     int m_vertexCount, m_indexCount;
     TextureClass* m_Textures;
     ModelType* m_model;
+    bool m_dynamic;
+    int m_maxVertices;
 
 };
 
