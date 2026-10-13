@@ -10,6 +10,7 @@ ModelClass::ModelClass()
     m_indexCount = 0;
     m_dynamic = false;
     m_maxVertices = 0;
+    m_sharedTexture = nullptr;
 }
 
 ModelClass::~ModelClass()
@@ -120,6 +121,25 @@ bool ModelClass::UpdateMesh(ID3D11DeviceContext* deviceContext, const MeshVertex
 	return true;
 }
 
+bool ModelClass::InitializeShared(ID3D11Device* device, char* modelFilename, ID3D11ShaderResourceView* sharedTexture)
+{
+	if(!LoadModel(modelFilename))
+	{
+		return false;
+	}
+
+	CalculateModelVectors();
+
+	if(!InitializeBuffers(device))
+	{
+		return false;
+	}
+
+	m_sharedTexture = sharedTexture;
+
+	return true;
+}
+
 void ModelClass::Shutdown()
 {
     // Shutdown the vertex and index buffers.
@@ -144,6 +164,11 @@ int ModelClass::GetIndexCount()
 
 ID3D11ShaderResourceView* ModelClass::GetTexture(int index)
 {
+	if(m_sharedTexture)
+	{
+		return m_sharedTexture;
+	}
+
 	return m_Textures[index].GetTexture();
 }
 

@@ -58,6 +58,8 @@ public:
     bool Initialize(ID3D11Device*, ID3D11DeviceContext*, char*, char*, char*, char* = nullptr);
     bool InitializeDynamic(ID3D11Device*, ID3D11DeviceContext*, int maxVertices, char* textureFilename1, char* textureFilename2, char* textureFilename3 = nullptr);
     bool UpdateMesh(ID3D11DeviceContext*, const MeshVertex*, int vertexCount);
+    // Loads the model file and draws it with a texture owned by someone else (the AssetManager's palette).
+    bool InitializeShared(ID3D11Device*, char* modelFilename, ID3D11ShaderResourceView* sharedTexture);
     void Shutdown();
     void Render(ID3D11DeviceContext*);
 
@@ -83,6 +85,7 @@ private:
     TextureClass* m_Textures;
     ModelType* m_model;
     bool m_dynamic;
+    ID3D11ShaderResourceView* m_sharedTexture;
     int m_maxVertices;
 
 };

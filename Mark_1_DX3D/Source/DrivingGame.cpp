@@ -11,7 +11,10 @@ static const int   MESH_SEGMENTS = 71;                  // MESH_LENGTH / MESH_ST
 // Ground strip beside the road: endless in front, only this wide on the sides.
 static const float GROUND_HALF_WIDTH = 60.0f;
 static const int   GROUND_LATERAL_CELLS = 3;            // small cells keep the per-vertex lighting accurate (see guide 0.B)
-static const float ROAD_TILE = 7.0f;                    // metres per texture repeat
+// T_RoadTexture.tga is a whole 4-lane cross-section: it spans the road's full width ONCE and repeats only along the
+// road. This is how many metres of road one repeat covers (dashes are ~1/12 of it: 21 m -> a dash every ~3.5 m).
+static const float ROAD_TEXTURE_LENGTH = 21.0f;
+static const char* ROAD_TEXTURE_FILE = "Resources/Textures/T_RoadTexture.tga";
 static const float GROUND_TILE = 12.0f;
 
 static const int ROAD_MAX_VERTICES = MESH_SEGMENTS * 6;
@@ -26,10 +29,13 @@ static const float CAR_HALF_WIDTH = 0.9f;
 static const float CAR_HALF_HEIGHT = 0.5f;
 static const float CAR_HALF_LENGTH = 2.0f;
 
-// Follow camera: it follows the ROAD direction (plus a little of the car's nose), not the car's every wiggle.
+// Which exported model is the player's car (Resources/Models/<name>.txt).
+static const char* CAR_MODEL_NAME = "car_blender";
+
 // Restart (R): the car is put back on the centre of the road, right where it is, with a push forward.
 static const float RESTART_SPEED = 15.0f;
 
+// Follow camera: it follows the ROAD direction (plus a little of the car's nose), not the car's every wiggle.
 static const float CAMERA_DISTANCE = 9.0f;
 static const float CAMERA_HEIGHT = 4.5f;
 static const float CAMERA_PITCH_DEGREES = 14.0f;
@@ -58,6 +64,7 @@ DrivingGame::DrivingGame()
     m_Renderer = nullptr;
     m_Camera = nullptr;
     m_CarModel = nullptr;
+    m_carIsAsset = false;
     m_PostModel = nullptr;
     m_RoadModel = nullptr;
     m_GroundModel = nullptr;
@@ -85,20 +92,31 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
 
     m_Camera = new CameraClass;
 
-    // Car (a squashed cube for now).
-    strcpy_s(modelFilename, "Resources/cube.txt");
-    strcpy_s(textureFilename, "Resources/ice.tga");
+    // Car: the exported low-poly model if there is one, otherwise a squashed cube.
+    const ModelAsset* carAsset = m_Renderer->GetAssets()->GetModel(CAR_MODEL_NAME);
 
-    m_CarModel = new ModelClass;
-
-    result = m_CarModel->Initialize(device, context, modelFilename, textureFilename, textureFilename);
-    if(!result)
+    if(carAsset)
     {
-        MessageBox(hwnd, L"Could not initialize the car model object.", L"Error", MB_OK);
-        return false;
+        m_CarModel = carAsset->model;
+        m_carIsAsset = true;
+    }
+    else
+    {
+        strcpy_s(modelFilename, "Resources/cube.txt");
+        strcpy_s(textureFilename, "Resources/ice.tga");
+
+        m_CarModel = new ModelClass;
+
+        result = m_CarModel->Initialize(device, context, modelFilename, textureFilename, textureFilename);
+        if(!result)
+        {
+            MessageBox(hwnd, L"Could not initialize the car model object.", L"Error", MB_OK);
+            return false;
+        }
     }
 
-    // Roadside posts.
+    // Roadside posts (a squashed cube).
+    strcpy_s(modelFilename, "Resources/cube.txt");
     strcpy_s(textureFilename, "Resources/stone01.tga");
 
     m_PostModel = new ModelClass;
@@ -111,7 +129,7 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
     }
 
     // Road surface (dynamic).
-    strcpy_s(textureFilename, "Resources/metal001.tga");
+    strcpy_s(textureFilename, ROAD_TEXTURE_FILE);
 
     m_RoadModel = new ModelClass;
 
@@ -186,8 +204,13 @@ void DrivingGame::Shutdown()
 
     if(m_CarModel)
     {
-        m_CarModel->Shutdown();
-        delete m_CarModel;
+        // Asset models belong to the AssetManager.
+        if(!m_carIsAsset)
+        {
+            m_CarModel->Shutdown();
+            delete m_CarModel;
+        }
+
         m_CarModel = nullptr;
     }
 
@@ -272,7 +295,7 @@ bool DrivingGame::RebuildMeshes(float meshStart)
     m_RoadVertices.clear();
     m_GroundVertices.clear();
 
-    AddStrip(m_RoadVertices, meshStart, -ROAD_HALF_WIDTH, ROAD_HALF_WIDTH, 1, ROAD_TILE);
+    AddStrip(m_RoadVertices, meshStart, -ROAD_HALF_WIDTH, ROAD_HALF_WIDTH, 1, ROAD_TEXTURE_LENGTH, true);
     AddStrip(m_GroundVertices, meshStart, -GROUND_HALF_WIDTH, -ROAD_HALF_WIDTH, GROUND_LATERAL_CELLS, GROUND_TILE);
     AddStrip(m_GroundVertices, meshStart, ROAD_HALF_WIDTH, GROUND_HALF_WIDTH, GROUND_LATERAL_CELLS, GROUND_TILE);
 
@@ -287,12 +310,12 @@ bool DrivingGame::RebuildMeshes(float meshStart)
 }
 
 // One band of the road, from lateralA to lateralB metres right of the centre line, split into lateralCells cells.
-void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float meshStart, float lateralA, float lateralB, int lateralCells, float tile)
+void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float meshStart, float lateralA, float lateralB, int lateralCells, float tile, bool fullWidthTexture)
 {
     XMFLOAT3 p[4];
     XMFLOAT2 uv[4];
     RoadPoint a, b;
-    float s0, s1, l0, l1, uvBase;
+    float s0, s1, l0, l1, uvBase, u0, u1;
     int segment, cell;
 
     // Texture coordinates are measured from a multiple of the tile length, so the pattern stays glued to the road
@@ -317,10 +340,23 @@ void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float 
             p[2] = OffsetFromRoad(b, l1, 0.0f);
             p[3] = OffsetFromRoad(b, l0, 0.0f);
 
-            uv[0] = XMFLOAT2(l0 / tile, (s0 - uvBase) / tile);
-            uv[1] = XMFLOAT2(l1 / tile, (s0 - uvBase) / tile);
-            uv[2] = XMFLOAT2(l1 / tile, (s1 - uvBase) / tile);
-            uv[3] = XMFLOAT2(l0 / tile, (s1 - uvBase) / tile);
+            if(fullWidthTexture)
+            {
+                // The picture spans the strip once, left edge to right edge (inset a hair so the wrap-around
+                // filtering does not pull in the opposite edge).
+                u0 = 0.002f + 0.996f * ((l0 - lateralA) / (lateralB - lateralA));
+                u1 = 0.002f + 0.996f * ((l1 - lateralA) / (lateralB - lateralA));
+            }
+            else
+            {
+                u0 = l0 / tile;
+                u1 = l1 / tile;
+            }
+
+            uv[0] = XMFLOAT2(u0, (s0 - uvBase) / tile);
+            uv[1] = XMFLOAT2(u1, (s0 - uvBase) / tile);
+            uv[2] = XMFLOAT2(u1, (s1 - uvBase) / tile);
+            uv[3] = XMFLOAT2(u0, (s1 - uvBase) / tile);
 
             MeshBuilder::AddQuad(vertices, p, uv, XMFLOAT3(0.0f, 1.0f, 0.0f));
         }
@@ -349,9 +385,17 @@ void DrivingGame::BuildDrawList(float meshStart)
     // Car: wherever the physics put it, facing the way the physics turned it.
     position = m_Car.GetPosition();
 
-    world = XMMatrixScaling(CAR_HALF_WIDTH, CAR_HALF_HEIGHT, CAR_HALF_LENGTH) *
-            XMMatrixRotationY(m_Car.GetHeading()) *
-            XMMatrixTranslation(position.x, CAR_HALF_HEIGHT, position.z);
+    if(m_carIsAsset)
+    {
+        // Authored at real size with its origin on the ground in the middle of the car.
+        world = XMMatrixRotationY(m_Car.GetHeading()) * XMMatrixTranslation(position.x, 0.0f, position.z);
+    }
+    else
+    {
+        world = XMMatrixScaling(CAR_HALF_WIDTH, CAR_HALF_HEIGHT, CAR_HALF_LENGTH) *
+                XMMatrixRotationY(m_Car.GetHeading()) *
+                XMMatrixTranslation(position.x, CAR_HALF_HEIGHT, position.z);
+    }
 
     item.model = m_CarModel;
     XMStoreFloat4x4(&item.world, world);

@@ -21,7 +21,8 @@ static const float AIR_DRAG = 0.9f;                 // N per (m/s)^2
 static const float ROLLING_RESISTANCE = 180.0f;     // N
 
 // Tyres. Friction coefficients above 1 are normal for road tyres. MORE GRIP = HIGHER VALUES.
-static const float FRICTION_FRONT = 1.2f;           // front a little below the rear: when you ask too much the FRONT slides first (safe understeer)
+static const float FRICTION_FRONT = 1.3f;           // front a little below the rear: when you ask too much the FRONT slides first (safe understeer)
+static const float FRICTION_FRONT_DRIFT = 1.2f;     // front grip while the handbrake is held: the drift is tuned for this value, keep it as is
 static const float FRICTION_REAR = 1.5f;
 static const float HANDBRAKE_REAR_FRICTION_SCALE = 0.75f;
 static const float OFFROAD_FRICTION_SCALE = 0.55f;
@@ -37,6 +38,10 @@ static const float STEER_LOCK_ACCEL = 14.0f;        // m/s^2: full steering at A
                                                     // Slightly above what the tyres give (~12-13), so full lock = at / just past the limit.
 static const float DRIFT_STEER_GAIN = 1.2f;        // extra lock allowed per radian of slide angle
 static const float STEER_RATE = 7.0f;               // how quickly the wheel follows the keys (1/s)
+static const float STEER_RETURN_RATE = 14.0f;       // ...and how quickly it comes back to centre when you let go (a lazy return makes high speed feel boaty)
+static const float STEER_SLIP_ALLOWANCE = 0.018f;   // rad of extra lock at EVERY speed. Real tyres need roughly this much wheel angle beyond the geometric
+                                                    // one just to make the sideways force; without it the lock at 40 m/s is slightly too small to hold the
+                                                    // tightest bends, the car runs wide and steering feels "dead" at top speed.
 
 // Walls beside the road.
 static const float ROAD_SHOULDER = 8.0f;
@@ -161,11 +166,11 @@ void Car::Step(const CarControls& controls)
     surface = m_offRoad ? OFFROAD_FRICTION_SCALE : 1.0f;
 
     // 1. Steering wheel eases toward the keys, front wheel angle shrinks with speed.
-    blend = STEER_RATE * FIXED_DT;
+    blend = ((fabsf(controls.steer) < fabsf(m_steer)) ? STEER_RETURN_RATE : STEER_RATE) * FIXED_DT;
     m_steer += (controls.steer - m_steer) * blend;
     // A fixed wheel angle would mean a hugely different cornering force at 10 and at 40 m/s (force ~ angle * speed^2),
     // so the lock shrinks with speed squared: the keys then feel the same at every speed.
-    lock = STEER_LOCK_ACCEL * (2.0f * AXLE_OFFSET) / fmaxf(speed * speed, 1.0f);
+    lock = STEER_LOCK_ACCEL * (2.0f * AXLE_OFFSET) / fmaxf(speed * speed, 1.0f) + STEER_SLIP_ALLOWANCE * (1.0f - controls.handbrake);
 
     // While the car is sliding, allow the wheels to turn as far as the slide angle: that is what lets you
     // counter-steer (point the front wheels where the car is actually going) and hold or catch a drift.
@@ -190,7 +195,7 @@ void Car::Step(const CarControls& controls)
     brakeForce = BRAKE_FORCE * controls.brake * brakeSign;
     handbrakeForce = HANDBRAKE_FORCE * controls.handbrake * brakeSign;
 
-    frontFriction = FRICTION_FRONT * surface;
+    frontFriction = (FRICTION_FRONT + (FRICTION_FRONT_DRIFT - FRICTION_FRONT) * controls.handbrake) * surface;
     rearFriction = FRICTION_REAR * surface;
     if(controls.handbrake > 0.0f)
     {

@@ -21,7 +21,7 @@ public:
 
 private:
     bool RebuildMeshes(float meshStart);
-    void AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float meshStart, float lateralA, float lateralB, int lateralCells, float tile);
+    void AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float meshStart, float lateralA, float lateralB, int lateralCells, float tile, bool fullWidthTexture = false);
     void BuildDrawList(float meshStart);
     void Restart();
     void UpdateCamera(float dt);
@@ -31,6 +31,7 @@ private:
     RendererClass* m_Renderer;          // not owned
     CameraClass* m_Camera;
     ModelClass* m_CarModel;
+    bool m_carIsAsset;                  // true: m_CarModel belongs to the AssetManager and is drawn unscaled
     ModelClass* m_PostModel;
     ModelClass* m_RoadModel;
     ModelClass* m_GroundModel;

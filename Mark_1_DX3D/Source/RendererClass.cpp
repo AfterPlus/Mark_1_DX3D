@@ -3,6 +3,7 @@
 RendererClass::RendererClass()
 {
     m_Direct3D = nullptr;
+    m_Assets = nullptr;
     m_ProjectionLight = nullptr;
     m_ViewPoint = nullptr;
     m_RenderTexture = nullptr;
@@ -28,6 +29,16 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     if(!result)
     {
         MessageBox(hwnd, L"Could not initialize Direct3D", L"Error", MB_OK);
+        return false;
+    }
+
+    // Shared model / palette loader.
+    m_Assets = new AssetManager;
+
+    result = m_Assets->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext());
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not load Resources/Textures/palette.tga (run Tools/make_palette.py).", L"Error", MB_OK);
         return false;
     }
 
@@ -147,6 +158,13 @@ void RendererClass::Shutdown()
     {
         delete m_ViewPoint;
         m_ViewPoint = nullptr;
+    }
+
+    if(m_Assets)
+    {
+        m_Assets->Shutdown();
+        delete m_Assets;
+        m_Assets = nullptr;
     }
 
     // D3D last: everything above was created from its device.

@@ -12,6 +12,7 @@
 #include "DepthShaderClass.h"
 #include "ShadowShaderClass.h"
 #include "SoftShadowShaderClass.h"
+#include "AssetManager.h"
 
 const bool VSYNC_ENABLED = true;
 const float SCREEN_DEPTH = 1000.0f;
@@ -50,12 +51,16 @@ public:
     // The Hud needs the device / context / ortho matrix.
     D3dClass* GetDirect3D() { return m_Direct3D; }
 
+    // Shared models + the palette texture.
+    AssetManager* GetAssets() { return m_Assets; }
+
 private:
     bool RenderDepthToTexture(const std::vector<RenderItem>& items);
     bool RenderBlackAndWhiteShadows(CameraClass* camera, const std::vector<RenderItem>& items);
 
 private:
     D3dClass* m_Direct3D;
+    AssetManager* m_Assets;
     LightClass* m_ProjectionLight;
     ViewPointClass* m_ViewPoint;
     RenderTextureClass* m_RenderTexture;
