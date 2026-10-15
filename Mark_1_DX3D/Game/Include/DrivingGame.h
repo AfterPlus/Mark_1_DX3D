@@ -24,10 +24,12 @@ public:
 private:
     bool RebuildMeshes(float meshStart);
     void AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float meshStart, float lateralA, float lateralB, int lateralCells, float tile, bool fullWidthTexture = false);
+    void SurfacePoint(float s, float lateral, XMFLOAT3& position, XMFLOAT3& normal) const;
     void BuildDrawList(float meshStart);
     void Restart();
     void UpdateCamera(float dt);
     void UpdateLight();
+    float GetCarHeight() const;
 
 private:
     RendererClass* m_Renderer;          // not owned

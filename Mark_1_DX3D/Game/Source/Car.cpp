@@ -154,7 +154,14 @@ XMFLOAT3 Car::GetPosition() const
 
 void Car::Update(float dt, const CarControls& controls, const Road& road)
 {
+    RoadPoint point;
+    float grade;
     int steps = 0;
+
+    // Gravity along the slope of the road where the car is (held for this frame's physics steps).
+    point = road.GetPoint(m_s);
+    grade = road.GetGrade(m_s);
+    m_slopeForce = v3df(sinf(point.heading), 0.0f, cosf(point.heading)) * (-MASS * GRAVITY * grade / sqrtf(1.0f + grade * grade));
 
     m_accumulator += dt;
 
@@ -348,6 +355,7 @@ void Car::Step(const CarControls& controls)
     }
 
     m_body->AddForce(drag);
+    m_body->AddForce(m_slopeForce);
 
     // 7. Let the Physics module integrate force -> acceleration -> velocity -> position / orientation.
     m_body->Update(FIXED_DT);

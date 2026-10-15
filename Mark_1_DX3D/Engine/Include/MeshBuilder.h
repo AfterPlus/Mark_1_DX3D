@@ -20,4 +20,19 @@ namespace MeshBuilder
             vertices.push_back(v);
         }
     }
+
+    // Same, with one normal per corner (smooth shading on curved surfaces).
+    inline void AddQuad(std::vector<ModelClass::MeshVertex>& vertices, const XMFLOAT3 p[4], const XMFLOAT2 uv[4], const XMFLOAT3 normal[4])
+    {
+        static const int order[6] = { 0, 1, 2, 0, 2, 3 };
+        int k, i;
+
+        for(k=0; k<6; k++)
+        {
+            i = order[k];
+
+            ModelClass::MeshVertex v = { p[i].x, p[i].y, p[i].z, uv[i].x, uv[i].y, normal[i].x, normal[i].y, normal[i].z };
+            vertices.push_back(v);
+        }
+    }
 }

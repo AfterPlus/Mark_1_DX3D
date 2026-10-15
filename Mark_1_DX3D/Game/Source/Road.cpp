@@ -11,6 +11,29 @@ static const float KEEP_BEHIND = 100.0f;
 static const float KEEP_AHEAD = 480.0f;
 static const int   START_INDEX = -30;           // the road begins 60 m behind the start line (s = 0)
 
+// Elevation. Long waves only, so climbs and descents are gradual (steepest grade is roughly 8%).
+// Road profile: three sine waves along s.        wavelength (m)     amplitude (m)
+static const float ROAD_HILL_LENGTH[3] =        { 620.0f, 310.0f, 170.0f };
+static const float ROAD_HILL_HEIGHT[3] =        { 6.0f,   2.5f,   0.8f };
+static const float HILLS_FLAT_START = 200.0f;   // the road starts level at s = 0 and grows into its hills over this distance
+
+// Land beside the road: banks (up) and dips (down) relative to the road, faded in from the road edge.
+static const float SIDE_SHOULDER = 2.0f;        // metres past the road edge that stay level with the road
+static const float SIDE_BLEND = 38.0f;          // ...then the banks / dips grow to full size over this width
+static const float SIDE_WAVE_LENGTH[2] =        { 150.0f, 80.0f };
+static const float SIDE_WAVE_HEIGHT[2] =        { 7.0f,   3.0f };
+static const float SIDE_WAVE_SKEW[2] =          { 0.045f, -0.07f };   // rad per metre sideways: left and right differ
+
+static float SmoothStep(float edge0, float edge1, float x)
+{
+    float t = (x - edge0) / (edge1 - edge0);
+
+    if(t < 0.0f) { t = 0.0f; }
+    if(t > 1.0f) { t = 1.0f; }
+
+    return t * t * (3.0f - 2.0f * t);
+}
+
 Road::Road()
 {
     m_firstIndex = 0;
@@ -18,11 +41,24 @@ Road::Road()
     m_segmentRemaining = 0.0f;
     m_sign = 1.0f;
     m_rng = 1;
+
+    for(int i=0; i<5; i++)
+    {
+        m_hillPhase[i] = 0.0f;
+    }
 }
 
 void Road::Reset(unsigned int seed)
 {
     RoadPoint first;
+
+    // The hill phases come from their own generator so the bends of the road are the same as before.
+    m_rng = (seed == 0) ? 1 : seed;
+    m_rng ^= 0x9E3779B9u;
+    for(int i=0; i<5; i++)
+    {
+        m_hillPhase[i] = NextRandom() * 6.2831853f;
+    }
 
     m_rng = (seed == 0) ? 1 : seed;
     m_points.clear();
@@ -66,6 +102,45 @@ float Road::GetMinS() const
 float Road::GetMaxS() const
 {
     return (float)(m_firstIndex + (int)m_points.size() - 1) * ROAD_STEP;
+}
+
+float Road::GetHeight(float s) const
+{
+    float height = 0.0f;
+    int i;
+
+    for(i=0; i<3; i++)
+    {
+        height += ROAD_HILL_HEIGHT[i] * sinf(s * (6.2831853f / ROAD_HILL_LENGTH[i]) + m_hillPhase[i]);
+    }
+
+    // Level at the start line, then ease into the hills (and level behind the start too).
+    return height * SmoothStep(0.0f, HILLS_FLAT_START, s);
+}
+
+float Road::GetGrade(float s) const
+{
+    return (GetHeight(s + 0.5f) - GetHeight(s - 0.5f));
+}
+
+float Road::GetSurfaceHeight(float s, float d) const
+{
+    float side, blend;
+    int i;
+
+    blend = SmoothStep(ROAD_HALF_WIDTH + SIDE_SHOULDER, ROAD_HALF_WIDTH + SIDE_SHOULDER + SIDE_BLEND, fabsf(d));
+    if(blend <= 0.0f)
+    {
+        return GetHeight(s);
+    }
+
+    side = 0.0f;
+    for(i=0; i<2; i++)
+    {
+        side += SIDE_WAVE_HEIGHT[i] * sinf(s * (6.2831853f / SIDE_WAVE_LENGTH[i]) + d * SIDE_WAVE_SKEW[i] + m_hillPhase[3 + i]);
+    }
+
+    return GetHeight(s) + side * blend;
 }
 
 RoadPoint Road::GetPoint(float s) const

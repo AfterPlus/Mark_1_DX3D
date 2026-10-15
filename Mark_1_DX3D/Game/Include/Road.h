@@ -43,6 +43,13 @@ public:
     float GetMinS() const;
     float GetMaxS() const;
 
+    // Elevation. The road rolls up and down along s (gentle, long hills); it is level across its width.
+    // Beside it the land rises into banks or falls away into dips, blended in gradually from the road edge.
+    // Both are pure functions of (s, d), so they never need to be stored and the road stays endless.
+    float GetHeight(float s) const;                 // height of the road surface at distance s
+    float GetGrade(float s) const;                  // dHeight / ds (+ = uphill when driving forward)
+    float GetSurfaceHeight(float s, float d) const; // road or ground height at s, d metres right of the centre line
+
 private:
     void AppendPoint();
     float NextRandom();     // 0..1
@@ -54,4 +61,5 @@ private:
     float m_segmentRemaining;       // metres until a new bend is chosen
     float m_sign;
     unsigned int m_rng;
+    float m_hillPhase[5];           // random phases (from the seed) for the elevation waves
 };

@@ -10,7 +10,7 @@ static const int   MESH_SEGMENTS = 71;                  // MESH_LENGTH / MESH_ST
 
 // Ground strip beside the road: endless in front, only this wide on the sides.
 static const float GROUND_HALF_WIDTH = 60.0f;
-static const int   GROUND_LATERAL_CELLS = 3;            // small cells keep the per-vertex lighting accurate (see guide 0.B)
+static const int   GROUND_LATERAL_CELLS = 10;           // small cells keep the per-vertex lighting accurate (see guide 0.B) and the banks / dips smooth
 // T_RoadTexture.tga is a whole 4-lane cross-section: it spans the road's full width ONCE and repeats only along the
 // road. This is how many metres of road one repeat covers (dashes are ~1/12 of it: 21 m -> a dash every ~3.5 m).
 static const float ROAD_TEXTURE_LENGTH = 21.0f;
@@ -48,7 +48,7 @@ static const float CAMERA_NOSE_FOLLOW = 0.35f;
 // Shadow "sun": far away and high so the light direction hardly changes across the screen.
 static const XMFLOAT3 LIGHT_OFFSET = XMFLOAT3(-35.0f, 70.0f, -35.0f);
 
-// World position of the point `lateral` metres to the right of a road point.
+// World position of the point `lateral` metres to the right of a road point (at height y).
 static XMFLOAT3 OffsetFromRoad(const RoadPoint& point, float lateral, float y)
 {
     return XMFLOAT3(point.x + cosf(point.heading) * lateral, y, point.z - sinf(point.heading) * lateral);
@@ -362,6 +362,7 @@ void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float 
     XMFLOAT3 p[4];
     XMFLOAT2 uv[4];
     RoadPoint a, b;
+    XMFLOAT3 n[4];
     float s0, s1, l0, l1, uvBase, u0, u1;
     int segment, cell;
 
@@ -382,10 +383,10 @@ void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float 
             l0 = lateralA + (lateralB - lateralA) * (float)cell / (float)lateralCells;
             l1 = lateralA + (lateralB - lateralA) * (float)(cell + 1) / (float)lateralCells;
 
-            p[0] = OffsetFromRoad(a, l0, 0.0f);
-            p[1] = OffsetFromRoad(a, l1, 0.0f);
-            p[2] = OffsetFromRoad(b, l1, 0.0f);
-            p[3] = OffsetFromRoad(b, l0, 0.0f);
+            SurfacePoint(s0, l0, p[0], n[0]);
+            SurfacePoint(s0, l1, p[1], n[1]);
+            SurfacePoint(s1, l1, p[2], n[2]);
+            SurfacePoint(s1, l0, p[3], n[3]);
 
             if(fullWidthTexture)
             {
@@ -405,9 +406,41 @@ void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float 
             uv[2] = XMFLOAT2(u1, (s1 - uvBase) / tile);
             uv[3] = XMFLOAT2(u0, (s1 - uvBase) / tile);
 
-            MeshBuilder::AddQuad(vertices, p, uv, XMFLOAT3(0.0f, 1.0f, 0.0f));
+            MeshBuilder::AddQuad(vertices, p, uv, n);
         }
     }
+}
+
+// The road / ground surface at distance s and `lateral` metres right of the centre line: its world position and its
+// upward normal (from the slope along the road and across it).
+void DrivingGame::SurfacePoint(float s, float lateral, XMFLOAT3& position, XMFLOAT3& normal) const
+{
+    static const float EPSILON = 0.5f;
+    XMFLOAT3 alongA, alongB, acrossA, acrossB;
+    XMVECTOR along, across;
+
+    position = OffsetFromRoad(m_Road.GetPoint(s), lateral, m_Road.GetSurfaceHeight(s, lateral));
+
+    alongA = OffsetFromRoad(m_Road.GetPoint(s - EPSILON), lateral, m_Road.GetSurfaceHeight(s - EPSILON, lateral));
+    alongB = OffsetFromRoad(m_Road.GetPoint(s + EPSILON), lateral, m_Road.GetSurfaceHeight(s + EPSILON, lateral));
+    acrossA = OffsetFromRoad(m_Road.GetPoint(s), lateral - EPSILON, m_Road.GetSurfaceHeight(s, lateral - EPSILON));
+    acrossB = OffsetFromRoad(m_Road.GetPoint(s), lateral + EPSILON, m_Road.GetSurfaceHeight(s, lateral + EPSILON));
+
+    along = XMVectorSubtract(XMLoadFloat3(&alongB), XMLoadFloat3(&alongA));
+    across = XMVectorSubtract(XMLoadFloat3(&acrossB), XMLoadFloat3(&acrossA));
+
+    // forward x right is the upward normal (the flip below is only a safety net).
+    XMStoreFloat3(&normal, XMVector3Normalize(XMVector3Cross(along, across)));
+    if(normal.y < 0.0f)
+    {
+        normal = XMFLOAT3(-normal.x, -normal.y, -normal.z);
+    }
+}
+
+// Height of the road under the car (the road is level across its width).
+float DrivingGame::GetCarHeight() const
+{
+    return m_Road.GetHeight(m_Car.GetS());
 }
 
 // Everything that is drawn this frame: road, ground, the car and the roadside posts.
@@ -416,8 +449,8 @@ void DrivingGame::BuildDrawList(float meshStart)
     RenderItem item;
     RoadPoint point;
     XMFLOAT3 position;
-    XMMATRIX world;
-    float s, firstPost;
+    XMMATRIX world, tilt;
+    float s, firstPost, carY, grade, relative, pitch, roll;
     int side;
 
     m_Items.clear();
@@ -429,20 +462,31 @@ void DrivingGame::BuildDrawList(float meshStart)
     item.model = m_GroundModel;
     m_Items.push_back(item);
 
-    // Car: wherever the physics put it, facing the way the physics turned it.
+    // Car: wherever the physics put it, facing the way the physics turned it, sitting on the road.
     position = m_Car.GetPosition();
+    carY = GetCarHeight();
+
+    // Tilt it with the hill: nose up / down by the slope along its nose, and leaning by the slope across it
+    // (when it is sideways to the road in a drift).
+    point = m_Road.GetPoint(m_Car.GetS());
+    grade = m_Road.GetGrade(m_Car.GetS());
+    relative = m_Car.GetHeading() - point.heading;
+    pitch = -atanf(grade * cosf(relative));
+    roll = -atanf(grade * sinf(relative));
+    tilt = XMMatrixRotationZ(roll) * XMMatrixRotationX(pitch);
 
     if(m_carIsAsset)
     {
         // Authored at real size with its origin on the ground in the middle of the car.
-        world = XMMatrixScaling(CAR_MODEL_SCALE, CAR_MODEL_SCALE, CAR_MODEL_SCALE) *
-                XMMatrixRotationY(m_Car.GetHeading()) * XMMatrixTranslation(position.x, 0.0f, position.z);
+        world = XMMatrixScaling(CAR_MODEL_SCALE, CAR_MODEL_SCALE, CAR_MODEL_SCALE) * tilt *
+                XMMatrixRotationY(m_Car.GetHeading()) * XMMatrixTranslation(position.x, carY, position.z);
     }
     else
     {
         world = XMMatrixScaling(CAR_HALF_WIDTH, CAR_HALF_HEIGHT, CAR_HALF_LENGTH) *
+                XMMatrixTranslation(0.0f, CAR_HALF_HEIGHT, 0.0f) * tilt *
                 XMMatrixRotationY(m_Car.GetHeading()) *
-                XMMatrixTranslation(position.x, CAR_HALF_HEIGHT, position.z);
+                XMMatrixTranslation(position.x, carY, position.z);
     }
 
     // The car does not cast a shadow.
@@ -461,7 +505,7 @@ void DrivingGame::BuildDrawList(float meshStart)
 
         for(side=-1; side<=1; side+=2)
         {
-            position = OffsetFromRoad(point, (float)side * POST_OFFSET, 0.7f);
+            position = OffsetFromRoad(point, (float)side * POST_OFFSET, m_Road.GetSurfaceHeight(s, (float)side * POST_OFFSET) + 0.7f);
 
             world = XMMatrixScaling(0.15f, 0.7f, 0.15f) *
                     XMMatrixRotationY(point.heading) *
@@ -491,7 +535,7 @@ void DrivingGame::UpdateCamera(float dt)
 
     m_cameraYaw += WrapAngle(targetYaw - m_cameraYaw) * blend;
 
-    m_Camera->SetPosition(position.x - sinf(m_cameraYaw) * CAMERA_DISTANCE, CAMERA_HEIGHT, position.z - cosf(m_cameraYaw) * CAMERA_DISTANCE);
+    m_Camera->SetPosition(position.x - sinf(m_cameraYaw) * CAMERA_DISTANCE, GetCarHeight() + CAMERA_HEIGHT, position.z - cosf(m_cameraYaw) * CAMERA_DISTANCE);
     m_Camera->SetRotation(CAMERA_PITCH_DEGREES, m_cameraYaw * (180.0f / XM_PI), 0.0f);
 }
 
@@ -499,6 +543,8 @@ void DrivingGame::UpdateLight()
 {
     XMFLOAT3 position = m_Car.GetPosition();
 
+    position.y = GetCarHeight();
+
     // The shadow light rides along with the car at a fixed offset.
-    m_Renderer->SetLight(XMFLOAT3(position.x + LIGHT_OFFSET.x, LIGHT_OFFSET.y, position.z + LIGHT_OFFSET.z), position);
+    m_Renderer->SetLight(XMFLOAT3(position.x + LIGHT_OFFSET.x, position.y + LIGHT_OFFSET.y, position.z + LIGHT_OFFSET.z), position);
 }

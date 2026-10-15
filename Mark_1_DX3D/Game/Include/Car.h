@@ -88,4 +88,7 @@ private:
     // Weight transfer.
     float m_longAccel;      // smoothed acceleration along the nose
     bool m_wallHit;
+
+    // Hills: the part of gravity that pulls along the road (uphill slows the car, downhill speeds it up).
+    Physics::v3df m_slopeForce;
 };
