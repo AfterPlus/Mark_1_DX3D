@@ -29,6 +29,7 @@ struct RenderItem
 {
     ModelClass* model;
     XMFLOAT4X4 world;
+    bool castsShadow = true;        // false = left out of the shadow map (still receives shadows)
 };
 
 class RendererClass

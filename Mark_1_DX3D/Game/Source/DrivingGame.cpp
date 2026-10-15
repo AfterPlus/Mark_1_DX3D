@@ -441,9 +441,12 @@ void DrivingGame::BuildDrawList(float meshStart)
                 XMMatrixTranslation(position.x, CAR_HALF_HEIGHT, position.z);
     }
 
+    // The car does not cast a shadow.
     item.model = m_CarModel;
     XMStoreFloat4x4(&item.world, world);
+    item.castsShadow = false;
     m_Items.push_back(item);
+    item.castsShadow = true;
 
     // Posts on both sides, at fixed distances along the road.
     firstPost = ceilf(meshStart / POST_SPACING) * POST_SPACING;

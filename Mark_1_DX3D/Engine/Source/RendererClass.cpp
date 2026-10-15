@@ -305,6 +305,11 @@ bool RendererClass::RenderDepthToTexture(const std::vector<RenderItem>& items)
 
     for(i=0; i<items.size(); i++)
     {
+        if(!items[i].castsShadow)
+        {
+            continue;
+        }
+
         worldMatrix = XMLoadFloat4x4(&items[i].world);
 
         items[i].model->Render(m_Direct3D->GetDeviceContext());
