@@ -10,7 +10,8 @@ static const int   MESH_SEGMENTS = 71;                  // MESH_LENGTH / MESH_ST
 
 // Ground strip beside the road: endless in front, only this wide on the sides.
 static const float GROUND_HALF_WIDTH = 60.0f;
-static const int   GROUND_LATERAL_CELLS = 10;           // small cells keep the per-vertex lighting accurate (see guide 0.B) and the banks / dips smooth
+static const int   GROUND_LATERAL_CELLS = 16;           // small cells keep the per-vertex lighting accurate (see guide 0.B) and the banks / drops smooth;
+                                                        // they are narrowest at the road edge, where the land changes fastest
 // T_RoadTexture.tga is a whole 4-lane cross-section: it spans the road's full width ONCE and repeats only along the
 // road. This is how many metres of road one repeat covers (dashes are ~1/12 of it: 21 m -> a dash every ~3.5 m).
 static const float ROAD_TEXTURE_LENGTH = 21.0f;
@@ -52,6 +53,25 @@ static const XMFLOAT3 LIGHT_OFFSET = XMFLOAT3(-35.0f, 70.0f, -35.0f);
 static XMFLOAT3 OffsetFromRoad(const RoadPoint& point, float lateral, float y)
 {
     return XMFLOAT3(point.x + cosf(point.heading) * lateral, y, point.z - sinf(point.heading) * lateral);
+}
+
+// Lateral position of cell edge `index` of a strip split into `cells` cells. With `denseAtRoad` the cells start narrow at
+// the edge nearest the road and widen outward (quadratic spacing); otherwise they are even.
+static float StripLateral(float lateralA, float lateralB, int index, int cells, bool denseAtRoad)
+{
+    float t = (float)index / (float)cells;
+
+    if(!denseAtRoad)
+    {
+        return lateralA + (lateralB - lateralA) * t;
+    }
+
+    if(fabsf(lateralA) <= fabsf(lateralB))
+    {
+        return lateralA + (lateralB - lateralA) * t * t;
+    }
+
+    return lateralB + (lateralA - lateralB) * t * t;
 }
 
 static float WrapAngle(float angle)
@@ -380,8 +400,8 @@ void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float 
 
         for(cell=0; cell<lateralCells; cell++)
         {
-            l0 = lateralA + (lateralB - lateralA) * (float)cell / (float)lateralCells;
-            l1 = lateralA + (lateralB - lateralA) * (float)(cell + 1) / (float)lateralCells;
+            l0 = StripLateral(lateralA, lateralB, cell, lateralCells, !fullWidthTexture);
+            l1 = StripLateral(lateralA, lateralB, cell + 1, lateralCells, !fullWidthTexture);
 
             SurfacePoint(s0, l0, p[0], n[0]);
             SurfacePoint(s0, l1, p[1], n[1]);

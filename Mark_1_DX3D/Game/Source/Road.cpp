@@ -11,18 +11,33 @@ static const float KEEP_BEHIND = 100.0f;
 static const float KEEP_AHEAD = 480.0f;
 static const int   START_INDEX = -30;           // the road begins 60 m behind the start line (s = 0)
 
-// Elevation. Long waves only, so climbs and descents are gradual (steepest grade is roughly 8%).
-// Road profile: three sine waves along s.        wavelength (m)     amplitude (m)
+// Elevation. The road is split into zones of ZONE_LENGTH +- ZONE_JITTER metres; each zone rolls its own landscape.
+static const float ZONE_LENGTH = 300.0f;
+static const float ZONE_JITTER = 0.2f;          // boundaries move up to +-20% of a zone, so zones are 180..420 m long (always longer than ROAD_BLEND)
+static const float ROAD_BLEND = 170.0f;         // metres over which the road's hilliness changes between zones (keeps grades gentle)
+static const float SIDE_BLEND = 50.0f;          // metres over which the land beside the road changes between zones
+static const float CALM_CHANCE = 0.2f;          // chance a zone is completely flat: level road, plains on both sides
+
+// Road profile: three long sine waves along s, scaled per zone by 0 (flat) .. 1 (fully rolling, ~8% grades).
+//                                               wavelength (m)     amplitude (m)
 static const float ROAD_HILL_LENGTH[3] =        { 620.0f, 310.0f, 170.0f };
 static const float ROAD_HILL_HEIGHT[3] =        { 6.0f,   2.5f,   0.8f };
 static const float HILLS_FLAT_START = 200.0f;   // the road starts level at s = 0 and grows into its hills over this distance
 
-// Land beside the road: banks (up) and dips (down) relative to the road, faded in from the road edge.
-static const float SIDE_SHOULDER = 2.0f;        // metres past the road edge that stay level with the road
-static const float SIDE_BLEND = 38.0f;          // ...then the banks / dips grow to full size over this width
-static const float SIDE_WAVE_LENGTH[2] =        { 150.0f, 80.0f };
-static const float SIDE_WAVE_HEIGHT[2] =        { 7.0f,   3.0f };
-static const float SIDE_WAVE_SKEW[2] =          { 0.045f, -0.07f };   // rad per metre sideways: left and right differ
+// Land beside the road stays level with it for SIDE_SHOULDER metres past the edge, then takes the zone's shape.
+static const float SIDE_SHOULDER = 2.0f;
+
+enum SideType
+{
+    SIDE_PLAIN,         // flat, a hint of undulation
+    SIDE_HILLS,         // rolling hills, up and down
+    SIDE_BANK,          // the land rises into a bank / hillside
+    SIDE_DROP,          // a sudden deep drop just past the shoulder
+    SIDE_VALLEY,        // the land falls gently away
+};
+
+// How often each side type is picked (sums to 1), in SideType order.
+static const float SIDE_CHANCE[5] = { 0.30f, 0.25f, 0.15f, 0.15f, 0.15f };
 
 static float SmoothStep(float edge0, float edge1, float x)
 {
@@ -34,6 +49,150 @@ static float SmoothStep(float edge0, float edge1, float x)
     return t * t * (3.0f - 2.0f * t);
 }
 
+// Stateless random number 0..1 for (seed, zone, salt): the same inputs always give the same value.
+static float Hash01(unsigned int seed, int zone, unsigned int salt)
+{
+    unsigned int x = seed * 0x9E3779B1u ^ (unsigned int)zone * 0x85EBCA77u ^ salt * 0xC2B2AE3Du;
+
+    x ^= x >> 16;
+    x *= 0x7FEB352Du;
+    x ^= x >> 15;
+    x *= 0x846CA68Bu;
+    x ^= x >> 16;
+
+    return (float)(x & 0xFFFFFF) / 16777216.0f;
+}
+
+// Where zone `zone` begins.
+static float ZoneStart(unsigned int seed, int zone)
+{
+    return ((float)zone + (Hash01(seed, zone, 1) - 0.5f) * 2.0f * ZONE_JITTER) * ZONE_LENGTH;
+}
+
+// The two zones that make up the landscape at s and how much of the second one shows (0..1). Within `blend` metres of a
+// boundary the two zones on either side of it are mixed; elsewhere both are the zone s is in.
+static void ZoneMix(unsigned int seed, float s, float blend, int& zoneA, int& zoneB, float& weight)
+{
+    int zone = (int)floorf(s / ZONE_LENGTH);
+    float start, end;
+
+    if(s < ZoneStart(seed, zone))              { zone--; }
+    else if(s >= ZoneStart(seed, zone + 1))    { zone++; }
+
+    start = ZoneStart(seed, zone);
+    end = ZoneStart(seed, zone + 1);
+
+    zoneA = zone;
+    zoneB = zone;
+    weight = 0.0f;
+
+    if(s < start + 0.5f * blend)
+    {
+        zoneA = zone - 1;
+        weight = SmoothStep(start - 0.5f * blend, start + 0.5f * blend, s);
+    }
+    else if(s > end - 0.5f * blend)
+    {
+        zoneB = zone + 1;
+        weight = SmoothStep(end - 0.5f * blend, end + 0.5f * blend, s);
+    }
+}
+
+// A whole zone is flat (the start zone always is).
+static bool ZoneIsCalm(unsigned int seed, int zone)
+{
+    return zone <= 0 || Hash01(seed, zone, 2) < CALM_CHANCE;
+}
+
+// How hilly the road itself is in a zone: 0 = flat .. 1 = fully rolling.
+static float ZoneRoadHills(unsigned int seed, int zone)
+{
+    float r;
+
+    if(ZoneIsCalm(seed, zone))
+    {
+        return 0.0f;
+    }
+
+    r = Hash01(seed, zone, 3);
+
+    if(r < 0.3f) { return 0.0f; }                                       // flat road (the sides may still have hills)
+    if(r < 0.7f) { return 0.3f + 0.4f * Hash01(seed, zone, 4); }       // gently rolling
+
+    return 0.75f + 0.25f * Hash01(seed, zone, 5);                       // properly hilly
+}
+
+// Height of the land on one side (side = -1 left, +1 right) relative to the road, for one zone.
+// u = metres past the shoulder (> 0).
+static float ZoneSideHeight(unsigned int seed, int zone, int side, float s, float u)
+{
+    unsigned int salt = (side < 0) ? 100 : 200;
+    float pick, a, b, c, phase, length, height, width;
+    int type;
+
+    // Pick the type.
+    type = SIDE_PLAIN;
+
+    if(!ZoneIsCalm(seed, zone))
+    {
+        pick = Hash01(seed, zone, salt);
+
+        for(type=0; type<4; type++)
+        {
+            if(pick < SIDE_CHANCE[type]) { break; }
+            pick -= SIDE_CHANCE[type];
+        }
+    }
+
+    // Random size / shape of it.
+    a = Hash01(seed, zone, salt + 1);
+    b = Hash01(seed, zone, salt + 2);
+    c = Hash01(seed, zone, salt + 3);
+    phase = Hash01(seed, zone, salt + 4) * 6.2831853f;
+
+    switch(type)
+    {
+        case SIDE_HILLS:
+        {
+            height = 3.0f + 7.0f * a;
+            length = 50.0f + 110.0f * b;
+
+            return height * SmoothStep(0.0f, 12.0f + 20.0f * c, u) *
+                   (0.65f * sinf(s * (6.2831853f / length) + u * 0.06f + phase) +
+                    0.35f * sinf(s * (6.2831853f / (0.43f * length)) - u * 0.11f + 2.0f * phase));
+        }
+
+        case SIDE_BANK:
+        {
+            height = 5.0f + 12.0f * a;
+            width = 8.0f + 25.0f * b;
+
+            return SmoothStep(0.0f, width, u) * (height + 1.5f * sinf(s * (6.2831853f / 70.0f) + u * 0.08f + phase));
+        }
+
+        case SIDE_DROP:
+        {
+            height = 10.0f + 18.0f * a;
+            width = 2.5f + 4.0f * b;
+
+            return -height * SmoothStep(0.0f, width, u) + 1.0f * sinf(s * 0.07f + u * 0.05f + phase) * SmoothStep(width, width + 10.0f, u);
+        }
+
+        case SIDE_VALLEY:
+        {
+            height = 3.0f + 5.0f * a;
+            width = 20.0f + 25.0f * b;
+
+            return SmoothStep(0.0f, width, u) * (-height + 0.8f * sinf(s * 0.05f + u * 0.07f + phase));
+        }
+
+        default:
+        {
+            return 0.5f * a * sinf(s * 0.05f + u * 0.04f + phase) * SmoothStep(0.0f, 15.0f, u);
+        }
+    }
+}
+
 Road::Road()
 {
     m_firstIndex = 0;
@@ -42,7 +201,9 @@ Road::Road()
     m_sign = 1.0f;
     m_rng = 1;
 
-    for(int i=0; i<5; i++)
+    m_terrainSeed = 1;
+
+    for(int i=0; i<3; i++)
     {
         m_hillPhase[i] = 0.0f;
     }
@@ -55,10 +216,11 @@ void Road::Reset(unsigned int seed)
     // The hill phases come from their own generator so the bends of the road are the same as before.
     m_rng = (seed == 0) ? 1 : seed;
     m_rng ^= 0x9E3779B9u;
-    for(int i=0; i<5; i++)
+    for(int i=0; i<3; i++)
     {
         m_hillPhase[i] = NextRandom() * 6.2831853f;
     }
+    m_terrainSeed = m_rng;
 
     m_rng = (seed == 0) ? 1 : seed;
     m_points.clear();
@@ -106,16 +268,20 @@ float Road::GetMaxS() const
 
 float Road::GetHeight(float s) const
 {
-    float height = 0.0f;
-    int i;
+    float height = 0.0f, hills, weight;
+    int i, zoneA, zoneB;
 
     for(i=0; i<3; i++)
     {
         height += ROAD_HILL_HEIGHT[i] * sinf(s * (6.2831853f / ROAD_HILL_LENGTH[i]) + m_hillPhase[i]);
     }
 
+    // How hilly this stretch is, blended slowly between zones.
+    ZoneMix(m_terrainSeed, s, ROAD_BLEND, zoneA, zoneB, weight);
+    hills = ZoneRoadHills(m_terrainSeed, zoneA) + (ZoneRoadHills(m_terrainSeed, zoneB) - ZoneRoadHills(m_terrainSeed, zoneA)) * weight;
+
     // Level at the start line, then ease into the hills (and level behind the start too).
-    return height * SmoothStep(0.0f, HILLS_FLAT_START, s);
+    return height * hills * SmoothStep(0.0f, HILLS_FLAT_START, s);
 }
 
 float Road::GetGrade(float s) const
@@ -125,22 +291,22 @@ float Road::GetGrade(float s) const
 
 float Road::GetSurfaceHeight(float s, float d) const
 {
-    float side, blend;
-    int i;
+    float u, weight, sideA, sideB;
+    int side, zoneA, zoneB;
 
-    blend = SmoothStep(ROAD_HALF_WIDTH + SIDE_SHOULDER, ROAD_HALF_WIDTH + SIDE_SHOULDER + SIDE_BLEND, fabsf(d));
-    if(blend <= 0.0f)
+    u = fabsf(d) - ROAD_HALF_WIDTH - SIDE_SHOULDER;
+    if(u <= 0.0f)
     {
         return GetHeight(s);
     }
 
-    side = 0.0f;
-    for(i=0; i<2; i++)
-    {
-        side += SIDE_WAVE_HEIGHT[i] * sinf(s * (6.2831853f / SIDE_WAVE_LENGTH[i]) + d * SIDE_WAVE_SKEW[i] + m_hillPhase[3 + i]);
-    }
+    side = (d < 0.0f) ? -1 : 1;
 
-    return GetHeight(s) + side * blend;
+    ZoneMix(m_terrainSeed, s, SIDE_BLEND, zoneA, zoneB, weight);
+    sideA = ZoneSideHeight(m_terrainSeed, zoneA, side, s, u);
+    sideB = (zoneB == zoneA) ? sideA : ZoneSideHeight(m_terrainSeed, zoneB, side, s, u);
+
+    return GetHeight(s) + sideA + (sideB - sideA) * weight;
 }
 
 RoadPoint Road::GetPoint(float s) const
