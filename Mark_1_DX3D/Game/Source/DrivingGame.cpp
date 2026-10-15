@@ -30,7 +30,7 @@ static const float CAR_HALF_HEIGHT = 0.5f;
 static const float CAR_HALF_LENGTH = 2.0f;
 
 // Which exported model is the player's car (Resources/Models/<name>.txt).
-static const char* CAR_MODEL_NAME = "car_blender";
+static const char* CAR_MODEL_NAME = "car_drifthorizon";
 
 // Restart (R): the car is put back on the centre of the road, right where it is, with a push forward.
 static const float RESTART_SPEED = 15.0f;
