@@ -5,7 +5,11 @@ D3dClass::D3dClass()
     m_swapChain = nullptr;
     m_device = nullptr;
     m_deviceContext = nullptr;
+    m_backBuffer = nullptr;
+    m_msaaColorBuffer = nullptr;
     m_renderTargetView = nullptr;
+    m_msaaSampleCount = 1;
+    m_msaaQuality = 0;
     m_depthStencilBuffer = nullptr;
     m_depthStencilState = nullptr;
     m_depthStencilView = nullptr;
@@ -25,9 +29,10 @@ D3dClass::D3dClass(const D3dClass&)
     
 }
 
-bool D3dClass::Initialize(int screenWidth, int screenHeight, bool vsync, HWND hwnd, float screenDepth, float screenNear)
+bool D3dClass::Initialize(int screenWidth, int screenHeight, bool vsync, HWND hwnd, float screenDepth, float screenNear, int msaaSampleCount)
 {
     HRESULT result;
+    UINT sampleCount, qualityLevels;
     IDXGIFactory* factory;
     IDXGIAdapter* adapter;
     IDXGIOutput* adapterOutput;
@@ -171,7 +176,8 @@ bool D3dClass::Initialize(int screenWidth, int screenHeight, bool vsync, HWND hw
     // Set the handle for the window to render to.
     swapChainDesc.OutputWindow = hwnd;
 
-    // Turn multisampling off.
+    // The swap chain itself is never multisampled; MSAA happens in a separate color buffer that
+    // is resolved into this back buffer in EndScene (see CreateSizeDependentResources).
     swapChainDesc.SampleDesc.Count = 1;
     swapChainDesc.SampleDesc.Quality = 0;
 
@@ -200,6 +206,28 @@ bool D3dClass::Initialize(int screenWidth, int screenHeight, bool vsync, HWND hw
         return false;
     }
     
+    // Pick the MSAA sample count: start at the requested count and halve it until the GPU
+    // reports support for both the color and depth formats (1 sample = MSAA off, always valid).
+    m_msaaSampleCount = 1;
+    m_msaaQuality = 0;
+    for(sampleCount = (msaaSampleCount > 1) ? (UINT)msaaSampleCount : 1; sampleCount > 1; sampleCount /= 2)
+    {
+        result = m_device->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM, sampleCount, &qualityLevels);
+        if(FAILED(result) || qualityLevels == 0)
+        {
+            continue;
+        }
+
+        result = m_device->CheckMultisampleQualityLevels(DXGI_FORMAT_D24_UNORM_S8_UINT, sampleCount, &qualityLevels);
+        if(FAILED(result) || qualityLevels == 0)
+        {
+            continue;
+        }
+
+        m_msaaSampleCount = sampleCount;
+        break;
+    }
+
     // Create the render target view, depth buffer and viewport sized to the back buffer.
     if(!CreateSizeDependentResources(screenWidth, screenHeight))
     {
@@ -248,7 +276,7 @@ bool D3dClass::Initialize(int screenWidth, int screenHeight, bool vsync, HWND hw
     rasterDesc.DepthClipEnable = true;
     rasterDesc.FillMode = D3D11_FILL_SOLID;
     rasterDesc.FrontCounterClockwise = false;
-    rasterDesc.MultisampleEnable = false;
+    rasterDesc.MultisampleEnable = (m_msaaSampleCount > 1);
     rasterDesc.ScissorEnable = false;
     rasterDesc.SlopeScaledDepthBias = 0.0f;
 
@@ -348,25 +376,49 @@ bool D3dClass::Initialize(int screenWidth, int screenHeight, bool vsync, HWND hw
 bool D3dClass::CreateSizeDependentResources(int screenWidth, int screenHeight)
 {
     HRESULT result;
-    ID3D11Texture2D* backBufferPtr;
+    D3D11_TEXTURE2D_DESC colorBufferDesc;
     D3D11_TEXTURE2D_DESC depthBufferDesc;
     D3D11_DEPTH_STENCIL_VIEW_DESC depthStencilViewDesc;
     float fieldOfView, screenAspect;
 
 
-    // Get the pointer to the back buffer.
-    result = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferPtr);
+    // Get the pointer to the back buffer. It is kept so EndScene can resolve MSAA into it.
+    result = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&m_backBuffer);
     if(FAILED(result))
     {
         return false;
     }
 
-    // Create the render target view with the back buffer pointer.
-    result = m_device->CreateRenderTargetView(backBufferPtr, NULL, &m_renderTargetView);
+    if(m_msaaSampleCount > 1)
+    {
+        // Create the multisampled color buffer the scene is actually rendered into.
+        ZeroMemory(&colorBufferDesc, sizeof(colorBufferDesc));
+        colorBufferDesc.Width = screenWidth;
+        colorBufferDesc.Height = screenHeight;
+        colorBufferDesc.MipLevels = 1;
+        colorBufferDesc.ArraySize = 1;
+        colorBufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        colorBufferDesc.SampleDesc.Count = m_msaaSampleCount;
+        colorBufferDesc.SampleDesc.Quality = m_msaaQuality;
+        colorBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+        colorBufferDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+        colorBufferDesc.CPUAccessFlags = 0;
+        colorBufferDesc.MiscFlags = 0;
 
-    // Release pointer to the back buffer as we no longer need it.
-    backBufferPtr->Release();
-    backBufferPtr = 0;
+        result = m_device->CreateTexture2D(&colorBufferDesc, NULL, &m_msaaColorBuffer);
+        if(FAILED(result))
+        {
+            return false;
+        }
+
+        // A NULL view desc makes D3D pick TEXTURE2DMS from the texture's sample count.
+        result = m_device->CreateRenderTargetView(m_msaaColorBuffer, NULL, &m_renderTargetView);
+    }
+    else
+    {
+        // No MSAA: render straight into the back buffer.
+        result = m_device->CreateRenderTargetView(m_backBuffer, NULL, &m_renderTargetView);
+    }
 
     if(FAILED(result))
     {
@@ -382,8 +434,9 @@ bool D3dClass::CreateSizeDependentResources(int screenWidth, int screenHeight)
     depthBufferDesc.MipLevels = 1;
     depthBufferDesc.ArraySize = 1;
     depthBufferDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depthBufferDesc.SampleDesc.Count = 1;
-    depthBufferDesc.SampleDesc.Quality = 0;
+    // The depth buffer must use the same sample count as the color buffer it is paired with.
+    depthBufferDesc.SampleDesc.Count = m_msaaSampleCount;
+    depthBufferDesc.SampleDesc.Quality = m_msaaQuality;
     depthBufferDesc.Usage = D3D11_USAGE_DEFAULT;
     depthBufferDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     depthBufferDesc.CPUAccessFlags = 0;
@@ -401,8 +454,15 @@ bool D3dClass::CreateSizeDependentResources(int screenWidth, int screenHeight)
 
     // Set up the depth stencil view description.
     depthStencilViewDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depthStencilViewDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-    depthStencilViewDesc.Texture2D.MipSlice = 0;
+    if(m_msaaSampleCount > 1)
+    {
+        depthStencilViewDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMS;
+    }
+    else
+    {
+        depthStencilViewDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+        depthStencilViewDesc.Texture2D.MipSlice = 0;
+    }
 
     // Create the depth stencil view.
     result = m_device->CreateDepthStencilView(m_depthStencilBuffer, &depthStencilViewDesc, &m_depthStencilView);
@@ -468,6 +528,19 @@ bool D3dClass::ResizeBuffers(int screenWidth, int screenHeight)
     {
         m_depthStencilBuffer->Release();
         m_depthStencilBuffer = 0;
+    }
+
+    if(m_msaaColorBuffer)
+    {
+        m_msaaColorBuffer->Release();
+        m_msaaColorBuffer = 0;
+    }
+
+    // Every reference to the back buffer must be gone before the swap chain can resize it.
+    if(m_backBuffer)
+    {
+        m_backBuffer->Release();
+        m_backBuffer = 0;
     }
 
     // Resize the swap chain's back buffer to the new dimensions.
@@ -537,6 +610,18 @@ void D3dClass::Shutdown()
         m_renderTargetView = nullptr;
     }
 
+    if(m_msaaColorBuffer)
+    {
+        m_msaaColorBuffer->Release();
+        m_msaaColorBuffer = nullptr;
+    }
+
+    if(m_backBuffer)
+    {
+        m_backBuffer->Release();
+        m_backBuffer = nullptr;
+    }
+
     if(m_deviceContext)
     {
         m_deviceContext->Release();
@@ -579,6 +664,12 @@ void D3dClass::BeginScene(float red, float green, float blue, float alpha)
 
 void D3dClass::EndScene()
 {
+    // Average each pixel's MSAA samples down into the single-sample back buffer.
+    if(m_msaaSampleCount > 1)
+    {
+        m_deviceContext->ResolveSubresource(m_backBuffer, 0, m_msaaColorBuffer, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
+    }
+
     // Present the back buffer to the screen since rendering is complete.
     if(m_vsync_enabled)
     {
@@ -629,6 +720,11 @@ void D3dClass::GetVideoCardInfo(char* cardName, int& memory)
     strcpy_s(cardName, 128, m_videoCardDescription);
     memory = m_videoCardMemory;
     return;
+}
+
+int D3dClass::GetMsaaSampleCount()
+{
+    return (int)m_msaaSampleCount;
 }
 
 void D3dClass::SetBackBufferRenderTarget()
