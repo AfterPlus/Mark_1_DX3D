@@ -12,6 +12,10 @@ RendererClass::RendererClass()
     m_ShadowShader = nullptr;
     m_SoftShadowShader = nullptr;
     m_shadowMapBias = 0.0f;
+    m_shadowBiasMeters = 0.0f;
+    m_lightNear = 0.0f;
+    m_lightFar = 0.0f;
+    m_lightDistance = 0.0f;
 }
 
 RendererClass::~RendererClass()
@@ -48,6 +52,9 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     m_ViewPoint->SetPosition(0.0f, 8.0f, -5.0f);
     m_ViewPoint->SetLookAt(0.0f, 0.0f, 0.0f);
     m_ViewPoint->SetProjectionParameters((XM_PI / 2.0f), 1.0f, 3.0f, 100.0f);
+    m_lightNear = 3.0f;
+    m_lightFar = 100.0f;
+    m_lightDistance = sqrtf(8.0f * 8.0f + 5.0f * 5.0f);
     m_ViewPoint->GenerateViewMatrix();
     m_ViewPoint->GenerateProjectionMatrix();
 
@@ -105,8 +112,10 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
-    // Fixes shadow acne.
-    m_shadowMapBias = 0.005f;
+    // Fixes shadow acne. Kept in metres: small enough that the gap under the car still shadows,
+    // large enough to cover a shadow-map texel's depth slope on the ground.
+    m_shadowBiasMeters = 0.1f;
+    UpdateShadowBias();
 
     return true;
 }
@@ -193,12 +202,34 @@ void RendererClass::SetLight(XMFLOAT3 position, XMFLOAT3 lookAt)
     m_ViewPoint->GenerateViewMatrix();
 
     m_ProjectionLight->SetPosition(position.x, position.y, position.z);
+
+    m_lightDistance = sqrtf((lookAt.x - position.x) * (lookAt.x - position.x) +
+                            (lookAt.y - position.y) * (lookAt.y - position.y) +
+                            (lookAt.z - position.z) * (lookAt.z - position.z));
+    UpdateShadowBias();
 }
 
 void RendererClass::SetLightProjection(float fieldOfView, float nearPlane, float farPlane)
 {
     m_ViewPoint->SetProjectionParameters(fieldOfView, 1.0f, nearPlane, farPlane);
     m_ViewPoint->GenerateProjectionMatrix();
+
+    m_lightNear = nearPlane;
+    m_lightFar = farPlane;
+    UpdateShadowBias();
+}
+
+// The shadow test compares perspective depth (z/w), which is not linear: one metre at distance d
+// changes it by near*far / ((far-near) * d^2). Convert the metre bias at the look-at distance, so the
+// same bias works whether the light is 10 m or 100 m away.
+void RendererClass::UpdateShadowBias()
+{
+    if(m_lightDistance <= 0.0f || m_lightFar <= m_lightNear)
+    {
+        return;
+    }
+
+    m_shadowMapBias = m_shadowBiasMeters * (m_lightNear * m_lightFar) / ((m_lightFar - m_lightNear) * m_lightDistance * m_lightDistance);
 }
 
 // Old Application::Render (the 3D half).

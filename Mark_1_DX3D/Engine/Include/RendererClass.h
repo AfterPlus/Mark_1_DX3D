@@ -60,6 +60,7 @@ public:
 private:
     bool RenderDepthToTexture(const std::vector<RenderItem>& items);
     bool RenderBlackAndWhiteShadows(CameraClass* camera, const std::vector<RenderItem>& items);
+    void UpdateShadowBias();
 
 private:
     D3dClass* m_Direct3D;
@@ -71,5 +72,9 @@ private:
     DepthShaderClass* m_DepthShader;
     ShadowShaderClass* m_ShadowShader;
     SoftShadowShaderClass* m_SoftShadowShader;
-    float m_shadowMapBias;
+    float m_shadowMapBias;      // in shadow-map depth (z/w) units, derived from m_shadowBiasMeters
+    float m_shadowBiasMeters;   // how far (world metres) a surface may be behind the shadow map and still count as lit
+    float m_lightNear;
+    float m_lightFar;
+    float m_lightDistance;      // light position -> look-at point
 };
