@@ -32,6 +32,9 @@ static const float CAR_HALF_LENGTH = 2.0f;
 // Which exported model is the player's car (Resources/Models/<name>.txt).
 static const char* CAR_MODEL_NAME = "car_drifthorizon";
 
+// Draw size of the car model (1 = as exported: 4.0 m long). Looks only; the physics box is unchanged.
+static const float CAR_MODEL_SCALE = 1.5f;
+
 // Restart (R): the car is put back on the centre of the road, right where it is, with a push forward.
 static const float RESTART_SPEED = 15.0f;
 
@@ -432,7 +435,8 @@ void DrivingGame::BuildDrawList(float meshStart)
     if(m_carIsAsset)
     {
         // Authored at real size with its origin on the ground in the middle of the car.
-        world = XMMatrixRotationY(m_Car.GetHeading()) * XMMatrixTranslation(position.x, 0.0f, position.z);
+        world = XMMatrixScaling(CAR_MODEL_SCALE, CAR_MODEL_SCALE, CAR_MODEL_SCALE) *
+                XMMatrixRotationY(m_Car.GetHeading()) * XMMatrixTranslation(position.x, 0.0f, position.z);
     }
     else
     {
