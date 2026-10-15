@@ -172,8 +172,8 @@ static float ZoneSideHeight(unsigned int seed, int zone, int side, float s, floa
 
         case SIDE_DROP:
         {
-            height = 10.0f + 18.0f * a;
-            width = 2.5f + 4.0f * b;
+            height = 4.0f + 6.0f * a;
+            width = 5.0f + 6.0f * b;
 
             return -height * SmoothStep(0.0f, width, u) + 1.0f * sinf(s * 0.07f + u * 0.05f + phase) * SmoothStep(width, width + 10.0f, u);
         }
