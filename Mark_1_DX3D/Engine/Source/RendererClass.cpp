@@ -25,7 +25,7 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
     // Create and initialize the Direct3D object.
     m_Direct3D = new D3dClass;
 
-    result = m_Direct3D->Initialize(screenWidth, screenHeight, VSYNC_ENABLED, hwnd, SCREEN_DEPTH, SCREEN_NEAR);
+    result = m_Direct3D->Initialize(screenWidth, screenHeight, VSYNC_ENABLED, hwnd, SCREEN_DEPTH, SCREEN_NEAR, MSAA_SAMPLE_COUNT);
     if(!result)
     {
         MessageBox(hwnd, L"Could not initialize Direct3D", L"Error", MB_OK);

@@ -18,7 +18,7 @@ public:
     ~D3dClass();
     D3dClass(const D3dClass&);
     
-    bool Initialize(int, int, bool, HWND, float, float);
+    bool Initialize(int, int, bool, HWND, float, float, int);
     void Shutdown();
 
     void BeginScene(float, float, float, float);
@@ -34,6 +34,7 @@ public:
     void GetOrthoMatrix(XMMATRIX&);
 
     void GetVideoCardInfo(char*, int&);
+    int GetMsaaSampleCount();
 
     void SetBackBufferRenderTarget();
     void ResetViewport();
@@ -56,7 +57,13 @@ private:
     IDXGISwapChain* m_swapChain;
     ID3D11Device* m_device;
     ID3D11DeviceContext* m_deviceContext;
+    // The scene is drawn into a multisampled color buffer (m_renderTargetView), then resolved
+    // into the swap chain's back buffer in EndScene. With MSAA off they are the same texture.
+    ID3D11Texture2D* m_backBuffer;
+    ID3D11Texture2D* m_msaaColorBuffer;
     ID3D11RenderTargetView* m_renderTargetView;
+    UINT m_msaaSampleCount;
+    UINT m_msaaQuality;
     ID3D11Texture2D* m_depthStencilBuffer;
     ID3D11DepthStencilState* m_depthStencilState;
     ID3D11DepthStencilView* m_depthStencilView;

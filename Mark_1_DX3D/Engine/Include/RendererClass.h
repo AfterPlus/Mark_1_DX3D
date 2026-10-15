@@ -19,6 +19,9 @@ const float SCREEN_DEPTH = 1000.0f;
 const float SCREEN_NEAR = 0.3f;
 const int SHADOWMAP_WIDTH = 1024;
 const int SHADOWMAP_HEIGHT = 1024;
+// MSAA samples per pixel for the main scene (1 = off, 2/4/8 = smoother edges, more GPU cost).
+// If the GPU does not support the requested count, D3dClass falls back to the next lower one.
+const int MSAA_SAMPLE_COUNT = 4;
 
 // One thing to draw: which model, and where it is in the world.
 // Stored as XMFLOAT4X4 (not XMMATRIX) so it is safe to keep inside std::vector.
