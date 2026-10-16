@@ -7,6 +7,7 @@
 #include "Car.h"
 #include "Road.h"
 #include "DriftScore.h"
+#include "Foliage.h"
 
 // Drift Horizon: an endless winding road, a car that steers across it and slides in the bends.
 class DrivingGame : public Game
@@ -43,6 +44,7 @@ private:
     Road m_Road;
     Car m_Car;
     DriftScore m_Score;
+    Foliage m_Foliage;
 
     std::vector<RenderItem> m_Items;
     std::vector<ModelClass::MeshVertex> m_RoadVertices;

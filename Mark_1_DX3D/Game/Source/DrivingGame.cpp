@@ -25,6 +25,10 @@ static const int GROUND_MAX_VERTICES = MESH_SEGMENTS * 6 * GROUND_LATERAL_CELLS 
 static const float POST_SPACING = 18.0f;
 static const float POST_OFFSET = ROAD_HALF_WIDTH + 1.2f;
 
+// Grass is placed from a little behind the camera to this far ahead of the car (re-placed with the road meshes).
+static const float GRASS_BEHIND = 25.0f;
+static const float GRASS_AHEAD = 160.0f;
+
 // Car box: cube.txt is 2 x 2 x 2, so these are half extents -> 1.8 m wide, 1.0 m high, 4.0 m long.
 static const float CAR_HALF_WIDTH = 0.9f;
 static const float CAR_HALF_HEIGHT = 0.5f;
@@ -175,6 +179,9 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
         return false;
     }
 
+    // Grass beside the road. Optional: without the converted models (Tools/blender/dh_export_grass.py) there is just no grass.
+    m_Foliage.Initialize(m_Renderer);
+
     // Narrow, far shadow light: ~54 m of shadowed area around the car.
     m_Renderer->SetLightProjection(0.6f, 10.0f, 200.0f);
 
@@ -203,6 +210,8 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
 void DrivingGame::Shutdown()
 {
     m_Items.clear();
+
+    m_Foliage.Shutdown();
 
     if(m_GroundModel)
     {
@@ -295,6 +304,7 @@ bool DrivingGame::Update(float dt, InputClass* input)
     }
 
     BuildDrawList(m_meshStart);
+    m_Foliage.Update(dt);
     UpdateCamera(dt);
     UpdateLight();
 
@@ -351,7 +361,7 @@ bool DrivingGame::GetHudLine(int index, char* text, int size)
 
 bool DrivingGame::Render()
 {
-    return m_Renderer->RenderScene(m_Camera, m_Items);
+    return m_Renderer->RenderScene(m_Camera, m_Items, m_Foliage.GetScene());
 }
 
 // Writes the road and ground meshes for the stretch of road starting at meshStart.
@@ -367,6 +377,9 @@ bool DrivingGame::RebuildMeshes(float meshStart)
     AddStrip(m_GroundVertices, meshStart, ROAD_HALF_WIDTH, GROUND_HALF_WIDTH, GROUND_LATERAL_CELLS, GROUND_TILE);
 
     m_meshBuilt = true;
+
+    // meshStart is MESH_BEHIND metres behind the car (give or take one MESH_STEP).
+    m_Foliage.Rebuild(m_Road, meshStart + MESH_BEHIND - GRASS_BEHIND, meshStart + MESH_BEHIND + GRASS_AHEAD);
 
     if(!m_RoadModel->UpdateMesh(context, m_RoadVertices.data(), (int)m_RoadVertices.size()))
     {

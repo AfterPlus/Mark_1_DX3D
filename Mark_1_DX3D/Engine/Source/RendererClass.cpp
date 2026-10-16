@@ -11,6 +11,7 @@ RendererClass::RendererClass()
     m_DepthShader = nullptr;
     m_ShadowShader = nullptr;
     m_SoftShadowShader = nullptr;
+    m_FoliageShader = nullptr;
     m_shadowMapBias = 0.0f;
     m_shadowBiasMeters = 0.0f;
     m_lightNear = 0.0f;
@@ -112,6 +113,15 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
+    m_FoliageShader = new FoliageShaderClass;
+
+    result = m_FoliageShader->Initialize(m_Direct3D->GetDevice(), hwnd, MAX_FOLIAGE_INSTANCES);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the foliage shader object.", L"Error", MB_OK);
+        return false;
+    }
+
     // Fixes shadow acne. Kept in metres: small enough that the gap under the car still shadows,
     // large enough to cover a shadow-map texel's depth slope on the ground.
     m_shadowBiasMeters = 0.1f;
@@ -122,6 +132,13 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
 void RendererClass::Shutdown()
 {
+    if(m_FoliageShader)
+    {
+        m_FoliageShader->Shutdown();
+        delete m_FoliageShader;
+        m_FoliageShader = nullptr;
+    }
+
     if(m_SoftShadowShader)
     {
         m_SoftShadowShader->Shutdown();
@@ -233,7 +250,7 @@ void RendererClass::UpdateShadowBias()
 }
 
 // Old Application::Render (the 3D half).
-bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderItem>& items)
+bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderItem>& items, const FoliageScene* foliage)
 {
     XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
     XMFLOAT4 lightPosition;
@@ -281,6 +298,68 @@ bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderIte
             return false;
         }
     }
+
+    // Pass 4: foliage on top of the lit scene (it uses the depth buffer the scene just wrote).
+    if(foliage && !foliage->batches.empty())
+    {
+        result = RenderFoliage(camera, *foliage);
+        if(!result)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Every batch's instances go into one buffer, then one instanced draw per model.
+bool RendererClass::RenderFoliage(CameraClass* camera, const FoliageScene& foliage)
+{
+    ID3D11DeviceContext* context = m_Direct3D->GetDeviceContext();
+    XMMATRIX viewMatrix, projectionMatrix;
+    XMFLOAT4 lightPosition;
+    size_t i;
+    int first;
+    bool result;
+
+    m_foliageInstances.clear();
+
+    for(i=0; i<foliage.batches.size(); i++)
+    {
+        m_foliageInstances.insert(m_foliageInstances.end(), foliage.batches[i].instances.begin(), foliage.batches[i].instances.end());
+    }
+
+    if(m_foliageInstances.empty())
+    {
+        return true;
+    }
+
+    camera->GetViewMatrix(viewMatrix);
+    m_Direct3D->GetProjectionMatrix(projectionMatrix);
+    lightPosition = m_ProjectionLight->GetPosition();
+
+    result = m_FoliageShader->Begin(context, m_foliageInstances.data(), (int)m_foliageInstances.size(), viewMatrix, projectionMatrix,
+                                    camera->GetPosition(), XMFLOAT3(lightPosition.x, lightPosition.y, lightPosition.z),
+                                    m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                    foliage.wind, m_BlackWhiteRenderTexture->GetShaderResourceView());
+    if(!result)
+    {
+        return false;
+    }
+
+    first = 0;
+
+    for(i=0; i<foliage.batches.size(); i++)
+    {
+        if(foliage.batches[i].model)
+        {
+            m_FoliageShader->Draw(context, foliage.batches[i].model, first, (int)foliage.batches[i].instances.size());
+        }
+
+        first += (int)foliage.batches[i].instances.size();
+    }
+
+    m_FoliageShader->End(context);
 
     return true;
 }
