@@ -9,12 +9,12 @@ static const float CELL_LENGTH = 1.0f;
 static const int   CHUNK_CELLS = 16;            // a chunk is this many cells long
 static const float CHUNK_LENGTH = CELL_LENGTH * CHUNK_CELLS;
 static const float EDGE_GAP = 1.5f;             // bare strip between the road edge and the first grass
-static const float FIELD_WIDTH = 50.0f;         // how far out from the road the grass goes (the ground ends ~53 m past the road edge)
+static const float FIELD_WIDTH = 90.0f;         // how far out from the road the grass goes (the ground ends 93 m past the road edge)
 static const float FIELD_FALLOFF = 1.3f;        // > 1 = denser near the road, thinner further out
 static const float ROOT_SINK = 0.03f;           // pushes roots a little into the ground so none float on slopes
 
-// Chunk bands, in metres past the road edge: [0, 8), [8, 20), [20, ...).
-static const float BAND_EDGES[2] = { 8.0f, 20.0f };
+// Chunk bands, in metres past the road edge: [0, 10), [10, 35), [35, ...).
+static const float BAND_EDGES[2] = { 10.0f, 35.0f };
 
 // Wind.
 static const float WIND_ANGLE = 0.6f;           // radians from +X; the direction drifts slowly around it
@@ -86,12 +86,12 @@ Foliage::Foliage()
     // carry the far field.
     FoliageType types[TYPE_COUNT] =
     {
-        { "grass_clump_01", 100.0f, 0.35f, 0.85f, 0.8f, 1.3f, 12.0f, 0.004f, nullptr },
-        { "grass_clump_02", 100.0f, 0.30f, 0.75f, 0.8f, 1.3f, 12.0f, 0.004f, nullptr },
-        { "grass_clump_03", 100.0f, 0.40f, 0.95f, 0.8f, 1.2f, 12.0f, 0.004f, nullptr },
-        { "grass_blade_01", 120.0f, 0.30f, 0.90f, 0.8f, 1.6f, 20.0f, 0.03f, nullptr },
-        { "grass_blade_02",  90.0f, 0.25f, 0.75f, 0.8f, 1.6f, 20.0f, 0.03f, nullptr },
-        { "grass_blade_03",  60.0f, 0.35f, 1.10f, 0.8f, 1.6f, 20.0f, 0.03f, nullptr },
+        { "grass_clump_01",  60.0f, 0.35f, 0.85f, 0.8f, 1.3f, 14.0f, 0.01f, nullptr },
+        { "grass_clump_02",  60.0f, 0.30f, 0.75f, 0.8f, 1.3f, 14.0f, 0.01f, nullptr },
+        { "grass_clump_03",  60.0f, 0.40f, 0.95f, 0.8f, 1.2f, 14.0f, 0.01f, nullptr },
+        { "grass_blade_01", 200.0f, 0.30f, 0.90f, 0.8f, 1.6f, 35.0f, 0.1f, nullptr },
+        { "grass_blade_02", 160.0f, 0.25f, 0.75f, 0.8f, 1.6f, 35.0f, 0.1f, nullptr },
+        { "grass_blade_03", 120.0f, 0.35f, 1.10f, 0.8f, 1.6f, 35.0f, 0.1f, nullptr },
     };
     int i;
 
@@ -189,7 +189,7 @@ void Foliage::Shutdown()
     m_ready = false;
 }
 
-void Foliage::Rebuild(const Road& road, float startS, float endS)
+void Foliage::Rebuild(const Road& road, float startS, float endS, const GroundHeight& groundHeight)
 {
     std::map<int, Chunk>::iterator it;
     int firstSlice, lastSlice, slice, side, key;
@@ -245,7 +245,7 @@ void Foliage::Rebuild(const Road& road, float startS, float endS)
                 Chunk& chunk = m_chunks[key];
 
                 chunk.slot = AllocateSlot();
-                BuildChunk(road, slice, side, chunk);
+                BuildChunk(road, groundHeight, slice, side, chunk);
                 changed = true;
             }
         }
@@ -275,7 +275,7 @@ int Foliage::AllocateSlot()
     return slot;
 }
 
-void Foliage::BuildChunk(const Road& road, int slice, int side, Chunk& chunk)
+void Foliage::BuildChunk(const Road& road, const GroundHeight& groundHeight, int slice, int side, Chunk& chunk)
 {
     FoliageRange range;
     XMFLOAT3 low, high;
@@ -293,7 +293,7 @@ void Foliage::BuildChunk(const Road& road, int slice, int side, Chunk& chunk)
 
     for(cell=slice * CHUNK_CELLS; cell<(slice + 1) * CHUNK_CELLS; cell++)
     {
-        PlaceCell(road, cell, side);
+        PlaceCell(road, groundHeight, cell, side);
     }
 
     next = chunk.slot * m_slotSize;
@@ -357,7 +357,7 @@ void Foliage::BuildChunk(const Road& road, int slice, int side, Chunk& chunk)
 }
 
 // The grass of one 1 m cell of road on one side (-1 = left, +1 = right).
-void Foliage::PlaceCell(const Road& road, int cell, int side)
+void Foliage::PlaceCell(const Road& road, const GroundHeight& groundHeight, int cell, int side)
 {
     FoliageInstance instance;
     CellRandom random;
@@ -399,7 +399,7 @@ void Foliage::PlaceCell(const Road& road, int cell, int side)
             d *= (float)side;
 
             instance.position = XMFLOAT3(point.x + cosf(point.heading) * d,
-                                         road.GetSurfaceHeight(s, d) - ROOT_SINK,
+                                         groundHeight(s, d) - ROOT_SINK,
                                          point.z - sinf(point.heading) * d);
 
             instance.yaw = random.Range(0.0f, XM_2PI);

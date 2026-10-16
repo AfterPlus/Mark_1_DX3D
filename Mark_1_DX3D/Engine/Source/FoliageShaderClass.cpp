@@ -220,9 +220,9 @@ bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, XMMATRIX view
 
     deviceContext->PSSetConstantBuffers(0, 1, &m_lightBuffer);
 
-    // The shadow is looked up once per vertex (at the instance's root), not per pixel.
-    deviceContext->VSSetShaderResources(1, 1, &shadowTexture);
-    deviceContext->VSSetSamplers(0, 1, &m_sampleStateClamp);
+    // The ground's shadow, looked up at each instance's root.
+    deviceContext->PSSetShaderResources(1, 1, &shadowTexture);
+    deviceContext->PSSetSamplers(0, 1, &m_sampleStateClamp);
 
     deviceContext->IASetInputLayout(m_layout);
     deviceContext->VSSetShader(m_vertexShader, NULL, 0);
@@ -297,7 +297,7 @@ void FoliageShaderClass::End(ID3D11DeviceContext* deviceContext)
     deviceContext->IASetVertexBuffers(1, 1, &noBuffer, &zero, &zero);
 
     // The shadow texture is a render target again next frame.
-    deviceContext->VSSetShaderResources(1, 1, &noTexture);
+    deviceContext->PSSetShaderResources(1, 1, &noTexture);
 
     deviceContext->RSSetState(m_previousRasterState);
     deviceContext->OMSetBlendState(m_previousBlendState, m_previousBlendFactor, m_previousSampleMask);

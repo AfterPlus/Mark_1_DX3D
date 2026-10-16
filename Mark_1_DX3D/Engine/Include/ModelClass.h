@@ -5,6 +5,8 @@
 #include <d3d11.h>
 #include <directxmath.h>
 #include <fstream>
+#include <string>
+#include <unordered_map>
 using namespace std;
 #include "TextureClass.h"
 using namespace DirectX;
@@ -87,6 +89,7 @@ private:
     bool m_dynamic;
     ID3D11ShaderResourceView* m_sharedTexture;
     int m_maxVertices;
+    bool m_weld;            // share identical corners (position, uv, normal) through the index buffer; static models only
 
 };
 

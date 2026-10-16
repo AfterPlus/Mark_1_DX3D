@@ -9,14 +9,15 @@ static const float MESH_LENGTH = 420.0f;
 static const int   MESH_SEGMENTS = 71;                  // MESH_LENGTH / MESH_STEP + 1
 
 // Ground strip beside the road: endless in front, only this wide on the sides.
-static const float GROUND_HALF_WIDTH = 60.0f;
-static const int   GROUND_LATERAL_CELLS = 16;           // small cells keep the per-vertex lighting accurate (see guide 0.B) and the banks / drops smooth;
+static const float GROUND_HALF_WIDTH = 100.0f;
+static const int   GROUND_LATERAL_CELLS = 20;           // small cells keep the per-vertex lighting accurate (see guide 0.B) and the banks / drops smooth;
                                                         // they are narrowest at the road edge, where the land changes fastest
 // T_RoadTexture.tga is a whole 4-lane cross-section: it spans the road's full width ONCE and repeats only along the
 // road. This is how many metres of road one repeat covers (dashes are ~1/12 of it: 21 m -> a dash every ~3.5 m).
 static const float ROAD_TEXTURE_LENGTH = 21.0f;
 static const char* ROAD_TEXTURE_FILE = "Resources/Textures/T_RoadTexture.tga";
 static const float GROUND_TILE = 12.0f;
+static const char* GROUND_TEXTURE_FILE = "Resources/Textures/T_GroundGrass.tga";     // made by Tools/make_ground_texture.py
 
 static const int ROAD_MAX_VERTICES = MESH_SEGMENTS * 6;
 static const int GROUND_MAX_VERTICES = MESH_SEGMENTS * 6 * GROUND_LATERAL_CELLS * 2;
@@ -169,7 +170,7 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
     }
 
     // Ground on both sides of the road (dynamic).
-    strcpy_s(textureFilename, "_Shader/dirt01.tga");
+    strcpy_s(textureFilename, GROUND_TEXTURE_FILE);
 
     m_GroundModel = new ModelClass;
 
@@ -380,7 +381,9 @@ bool DrivingGame::RebuildMeshes(float meshStart)
     m_meshBuilt = true;
 
     // meshStart is MESH_BEHIND metres behind the car (give or take one MESH_STEP).
-    m_Foliage.Rebuild(m_Road, meshStart + MESH_BEHIND - GRASS_BEHIND, meshStart + MESH_BEHIND + GRASS_AHEAD);
+    // Roots go on the ground mesh as it is drawn (its flat triangles), not on the smooth terrain function it samples.
+    m_Foliage.Rebuild(m_Road, meshStart + MESH_BEHIND - GRASS_BEHIND, meshStart + MESH_BEHIND + GRASS_AHEAD,
+                      [this](float s, float lateral) { return GroundMeshHeight(s, lateral); });
 
     if(!m_RoadModel->UpdateMesh(context, m_RoadVertices.data(), (int)m_RoadVertices.size()))
     {
@@ -469,6 +472,54 @@ void DrivingGame::SurfacePoint(float s, float lateral, XMFLOAT3& position, XMFLO
     {
         normal = XMFLOAT3(-normal.x, -normal.y, -normal.z);
     }
+}
+
+// Height of the ground mesh at distance s, `lateral` metres right of the centre line: the same flat triangles AddStrip
+// draws (cells MESH_STEP long, StripLateral wide, each quad split from its road-side corner at s0 to its outer corner at
+// s1). The smooth terrain (Road::GetSurfaceHeight) can be well above or below these triangles on hills and banks.
+float DrivingGame::GroundMeshHeight(float s, float lateral) const
+{
+    float side, e, t, s0, a, b, l0, l1, h0, h1, h2, h3;
+    int cell;
+
+    side = lateral < 0.0f ? -1.0f : 1.0f;
+    e = (fabsf(lateral) - ROAD_HALF_WIDTH) / (GROUND_HALF_WIDTH - ROAD_HALF_WIDTH);
+
+    if(e <= 0.0f)
+    {
+        return m_Road.GetSurfaceHeight(s, lateral);
+    }
+
+    // Cell across: edges sit at t^2 of the strip (StripLateral, dense at the road).
+    cell = (int)(sqrtf(e > 1.0f ? 1.0f : e) * GROUND_LATERAL_CELLS);
+    if(cell >= GROUND_LATERAL_CELLS)
+    {
+        cell = GROUND_LATERAL_CELLS - 1;
+    }
+
+    t = (float)cell / GROUND_LATERAL_CELLS;
+    l0 = ROAD_HALF_WIDTH + (GROUND_HALF_WIDTH - ROAD_HALF_WIDTH) * t * t;
+    t = (float)(cell + 1) / GROUND_LATERAL_CELLS;
+    l1 = ROAD_HALF_WIDTH + (GROUND_HALF_WIDTH - ROAD_HALF_WIDTH) * t * t;
+
+    // Cell along: mesh slices start at multiples of MESH_STEP.
+    s0 = floorf(s / MESH_STEP) * MESH_STEP;
+
+    a = (s - s0) / MESH_STEP;                       // 0..1 along
+    b = (fabsf(lateral) - l0) / (l1 - l0);          // 0..1 across
+
+    // Corners as AddStrip makes them: p0 (s0, l0), p1 (s0, l1), p2 (s1, l1), p3 (s1, l0); triangles 0-1-2 and 0-2-3.
+    h0 = m_Road.GetSurfaceHeight(s0, side * l0);
+    h1 = m_Road.GetSurfaceHeight(s0, side * l1);
+    h2 = m_Road.GetSurfaceHeight(s0 + MESH_STEP, side * l1);
+    h3 = m_Road.GetSurfaceHeight(s0 + MESH_STEP, side * l0);
+
+    if(b >= a)
+    {
+        return h0 + (h1 - h0) * b + (h2 - h1) * a;  // triangle p0 p1 p2
+    }
+
+    return h0 + (h3 - h0) * a + (h2 - h3) * b;      // triangle p0 p2 p3
 }
 
 // Height of the road under the car (the road is level across its width).

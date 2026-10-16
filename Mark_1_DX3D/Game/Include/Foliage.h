@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <functional>
 #include <map>
 #include <vector>
 #include "RendererClass.h"
@@ -25,8 +26,11 @@ public:
     bool Initialize(RendererClass* renderer);
     void Shutdown();
 
+    // Ground height at (road distance, metres right of the centre line), where the roots are put.
+    typedef std::function<float(float s, float lateral)> GroundHeight;
+
     // Makes sure the grass exists between road distances startS and endS (builds new chunks, drops old ones).
-    void Rebuild(const Road& road, float startS, float endS);
+    void Rebuild(const Road& road, float startS, float endS, const GroundHeight& groundHeight);
 
     // Advances the wind.
     void Update(float dt);
@@ -59,8 +63,8 @@ private:
         float radius[BAND_COUNT];
     };
 
-    void BuildChunk(const Road& road, int slice, int side, Chunk& chunk);
-    void PlaceCell(const Road& road, int cell, int side);
+    void BuildChunk(const Road& road, const GroundHeight& groundHeight, int slice, int side, Chunk& chunk);
+    void PlaceCell(const Road& road, const GroundHeight& groundHeight, int cell, int side);
     int AllocateSlot();
     void UpdateChunkList();
 
