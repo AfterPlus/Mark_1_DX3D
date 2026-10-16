@@ -14,6 +14,7 @@
 #include "SoftShadowShaderClass.h"
 #include "AssetManager.h"
 #include "FoliageShaderClass.h"
+#include "SkyboxClass.h"
 #include "FrustumClass.h"
 
 const bool VSYNC_ENABLED = true;
@@ -84,6 +85,9 @@ public:
     void SetLight(XMFLOAT3 position, XMFLOAT3 lookAt);
     void SetLightProjection(float fieldOfView, float nearPlane, float farPlane);
 
+    // Sky cube map from a folder with px/nx/py/ny/pz/nz.png. Optional: without one the background stays black.
+    bool LoadSkybox(const char* folder);
+
     // Shadow passes + the lit scene pass (+ the foliage, if given). Calls BeginScene. Does NOT present,
     // so the HUD can still draw on top before EndFrame().
     bool RenderScene(CameraClass* camera, const std::vector<RenderItem>& items, FoliageScene* foliage = nullptr);
@@ -112,6 +116,7 @@ private:
     ShadowShaderClass* m_ShadowShader;
     SoftShadowShaderClass* m_SoftShadowShader;
     FoliageShaderClass* m_FoliageShader;
+    SkyboxClass* m_Skybox;
     const FoliageScene* m_foliageUploaded;      // the scene whose instances are on the GPU ...
     size_t m_foliageUploadedSize;               // ... and how many there were
     FrustumClass m_foliageFrustum;

@@ -184,6 +184,9 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
     // Grass beside the road. Optional: without the converted models (Tools/blender/dh_export_grass.py) there is just no grass.
     m_Foliage.Initialize(m_Renderer);
 
+    // Sky. Optional too: if the faces are missing the background stays black.
+    m_Renderer->LoadSkybox("Resources/SkyBox/Day");
+
     // Narrow, far shadow light: ~54 m of shadowed area around the car.
     m_Renderer->SetLightProjection(0.6f, 10.0f, 200.0f);
 

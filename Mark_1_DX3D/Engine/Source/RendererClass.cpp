@@ -13,6 +13,7 @@ RendererClass::RendererClass()
     m_ShadowShader = nullptr;
     m_SoftShadowShader = nullptr;
     m_FoliageShader = nullptr;
+    m_Skybox = nullptr;
     m_foliageUploaded = nullptr;
     m_foliageUploadedSize = 0;
     m_shadowMapBias = 0.0f;
@@ -135,6 +136,13 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
 void RendererClass::Shutdown()
 {
+    if(m_Skybox)
+    {
+        m_Skybox->Shutdown();
+        delete m_Skybox;
+        m_Skybox = nullptr;
+    }
+
     if(m_FoliageShader)
     {
         m_FoliageShader->Shutdown();
@@ -253,6 +261,28 @@ void RendererClass::UpdateShadowBias()
 }
 
 // Old Application::Render (the 3D half).
+bool RendererClass::LoadSkybox(const char* folder)
+{
+    if(m_Skybox)
+    {
+        m_Skybox->Shutdown();
+        delete m_Skybox;
+        m_Skybox = nullptr;
+    }
+
+    m_Skybox = new SkyboxClass;
+
+    if(!m_Skybox->Initialize(m_Direct3D->GetDevice(), NULL, folder))
+    {
+        m_Skybox->Shutdown();
+        delete m_Skybox;
+        m_Skybox = nullptr;
+        return false;
+    }
+
+    return true;
+}
+
 bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderItem>& items, FoliageScene* foliage)
 {
     XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
@@ -306,6 +336,16 @@ bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderIte
     if(foliage && !foliage->chunks.empty())
     {
         result = RenderFoliage(camera, *foliage);
+        if(!result)
+        {
+            return false;
+        }
+    }
+
+    // Pass 5: the sky, last, so it only fills the pixels nothing else covered.
+    if(m_Skybox)
+    {
+        result = m_Skybox->Render(m_Direct3D->GetDeviceContext(), viewMatrix, projectionMatrix);
         if(!result)
         {
             return false;
