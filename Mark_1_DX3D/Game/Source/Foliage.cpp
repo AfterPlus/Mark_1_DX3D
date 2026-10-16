@@ -5,9 +5,9 @@ static const char* GRASS_TEXTURE_FILE = "Resources/Grass/Texture/Grass_BaseColor
 
 // Grass is placed in 1 m slices along the road; each slice and side gets its own random numbers.
 static const float CELL_LENGTH = 1.0f;
-static const float EDGE_GAP = 0.6f;             // bare strip between the road edge and the first grass
-static const float FIELD_WIDTH = 32.0f;         // how far out from the road the grass goes
-static const float FIELD_FALLOFF = 1.7f;        // > 1 = denser near the road, thinner further out
+static const float EDGE_GAP = 1.5f;             // bare strip between the road edge and the first grass
+static const float FIELD_WIDTH = 50.0f;         // how far out from the road the grass goes (the ground ends ~53 m past the road edge)
+static const float FIELD_FALLOFF = 1.3f;        // > 1 = denser near the road, thinner further out
 static const float ROOT_SINK = 0.03f;           // pushes roots a little into the ground so none float on slopes
 
 // Wind.
@@ -17,8 +17,8 @@ static const float WIND_STRENGTH = 0.28f;
 static const float WIND_SPEED = 1.8f;
 
 // Far grass shrinks away between these distances from the camera (the placed stretch reaches a bit further).
-static const float FADE_START = 110.0f;
-static const float FADE_END = 145.0f;
+static const float FADE_START = 115.0f;       // must stay below FADE_END
+static const float FADE_END = 150.0f;
 
 // Small integer hash -> well-mixed bits. Same input, same output, on every run.
 static unsigned int Hash(unsigned int x)
@@ -68,12 +68,12 @@ Foliage::Foliage()
     // name, tufts per metre per side, height range (m), width scale range.
     FoliageType types[TYPE_COUNT] =
     {
-        { "grass_clump_01", 0.9f, 0.35f, 0.85f, 0.8f, 1.3f, nullptr },
-        { "grass_clump_02", 0.8f, 0.30f, 0.75f, 0.8f, 1.3f, nullptr },
-        { "grass_clump_03", 0.8f, 0.40f, 0.95f, 0.8f, 1.2f, nullptr },
-        { "grass_blade_01", 2.0f, 0.30f, 0.90f, 0.8f, 1.6f, nullptr },
-        { "grass_blade_02", 2.0f, 0.25f, 0.75f, 0.8f, 1.6f, nullptr },
-        { "grass_blade_03", 2.0f, 0.35f, 1.10f, 0.8f, 1.6f, nullptr },
+        { "grass_clump_01", 3.0f, 0.35f, 0.85f, 0.8f, 1.3f, nullptr },
+        { "grass_clump_02", 3.0f, 0.30f, 0.75f, 0.8f, 1.3f, nullptr },
+        { "grass_clump_03", 3.0f, 0.40f, 0.95f, 0.8f, 1.2f, nullptr },
+        { "grass_blade_01", 8.0f, 0.30f, 0.90f, 0.8f, 1.6f, nullptr },
+        { "grass_blade_02", 8.0f, 0.25f, 0.75f, 0.8f, 1.6f, nullptr },
+        { "grass_blade_03", 8.0f, 0.35f, 1.10f, 0.8f, 1.6f, nullptr },
     };
     int i;
 
@@ -231,7 +231,7 @@ void Foliage::PlaceSide(const Road& road, int cell, int side)
 
             // Patches of thick and thin grass: thin patches drop some tufts and keep the rest shorter.
             patch = Patch(s, d * (float)side, 1.0f, 0.0f);
-            if(random.Next() > 0.3f + 0.7f * patch)
+            if(random.Next() > 0.55f + 0.45f * patch)
             {
                 continue;
             }

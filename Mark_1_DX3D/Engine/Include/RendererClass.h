@@ -24,7 +24,7 @@ const int SHADOWMAP_HEIGHT = 1024;
 // If the GPU does not support the requested count, D3dClass falls back to the next lower one.
 const int MSAA_SAMPLE_COUNT = 4;
 // Most foliage copies (grass tufts ...) drawn in one frame; more are dropped.
-const int MAX_FOLIAGE_INSTANCES = 16384;
+const int MAX_FOLIAGE_INSTANCES = 65536;
 
 // One thing to draw: which model, and where it is in the world.
 // Stored as XMFLOAT4X4 (not XMMATRIX) so it is safe to keep inside std::vector.
