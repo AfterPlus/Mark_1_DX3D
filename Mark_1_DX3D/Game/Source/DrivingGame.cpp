@@ -16,7 +16,12 @@ static const int   GROUND_LATERAL_CELLS = 20;           // small cells keep the 
 // road. This is how many metres of road one repeat covers (dashes are ~1/12 of it: 21 m -> a dash every ~3.5 m).
 static const float ROAD_TEXTURE_LENGTH = 21.0f;
 static const char* ROAD_TEXTURE_FILE = "Resources/Textures/T_RoadTexture.tga";
-static const float GROUND_TILE = 12.0f;
+// Metres of ground one copy of the grass texture covers. Kept large so the repeats are few and far apart; the UV warp
+// below bends the grid of copies so the ones that do show never line up in rows.
+static const float GROUND_TILE = 30.0f;
+// Ground UV warp: a few slow sine waves (wavelengths 90..330 m) shift the texture by up to ~1.6 * this many metres.
+// Small enough that the texture never stretches by more than about a third anywhere.
+static const float GROUND_WARP = 3.0f;
 static const char* GROUND_TEXTURE_FILE = "Resources/Textures/T_GroundGrass.tga";     // made by Tools/make_ground_texture.py
 
 static const int ROAD_MAX_VERTICES = MESH_SEGMENTS * 6;
@@ -369,6 +374,14 @@ bool DrivingGame::Render()
     return m_Renderer->RenderScene(m_Camera, m_Items, m_Foliage.GetScene());
 }
 
+// Offset in metres (du across, dv along the road) added to the ground's texture coordinates at (s, lateral). It only
+// depends on the place on the ground, so neighbouring quads and successive mesh rebuilds still agree at every vertex.
+static void GroundUvWarp(float s, float lateral, float& du, float& dv)
+{
+    du = GROUND_WARP * (sinf(s * 0.067f + lateral * 0.023f) + 0.6f * sinf(s * 0.027f - lateral * 0.041f + 1.7f));
+    dv = GROUND_WARP * (sinf(lateral * 0.063f - s * 0.019f + 0.4f) + 0.6f * sinf(lateral * 0.029f + s * 0.047f + 2.9f));
+}
+
 // Writes the road and ground meshes for the stretch of road starting at meshStart.
 bool DrivingGame::RebuildMeshes(float meshStart)
 {
@@ -403,8 +416,8 @@ void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float 
     XMFLOAT2 uv[4];
     RoadPoint a, b;
     XMFLOAT3 n[4];
-    float s0, s1, l0, l1, uvBase, u0, u1;
-    int segment, cell;
+    float s0, s1, l0, l1, uvBase, u0, u1, du[4], dv[4];
+    int segment, cell, corner;
 
     // Texture coordinates are measured from a multiple of the tile length, so the pattern stays glued to the road
     // while meshStart moves along.
@@ -428,6 +441,12 @@ void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float 
             SurfacePoint(s1, l1, p[2], n[2]);
             SurfacePoint(s1, l0, p[3], n[3]);
 
+            for(corner=0; corner<4; corner++)
+            {
+                du[corner] = 0.0f;
+                dv[corner] = 0.0f;
+            }
+
             if(fullWidthTexture)
             {
                 // The picture spans the strip once, left edge to right edge (inset a hair so the wrap-around
@@ -439,12 +458,17 @@ void DrivingGame::AddStrip(std::vector<ModelClass::MeshVertex>& vertices, float 
             {
                 u0 = l0 / tile;
                 u1 = l1 / tile;
+
+                GroundUvWarp(s0, l0, du[0], dv[0]);
+                GroundUvWarp(s0, l1, du[1], dv[1]);
+                GroundUvWarp(s1, l1, du[2], dv[2]);
+                GroundUvWarp(s1, l0, du[3], dv[3]);
             }
 
-            uv[0] = XMFLOAT2(u0, (s0 - uvBase) / tile);
-            uv[1] = XMFLOAT2(u1, (s0 - uvBase) / tile);
-            uv[2] = XMFLOAT2(u1, (s1 - uvBase) / tile);
-            uv[3] = XMFLOAT2(u0, (s1 - uvBase) / tile);
+            uv[0] = XMFLOAT2(u0 + du[0] / tile, (s0 - uvBase + dv[0]) / tile);
+            uv[1] = XMFLOAT2(u1 + du[1] / tile, (s0 - uvBase + dv[1]) / tile);
+            uv[2] = XMFLOAT2(u1 + du[2] / tile, (s1 - uvBase + dv[2]) / tile);
+            uv[3] = XMFLOAT2(u0 + du[3] / tile, (s1 - uvBase + dv[3]) / tile);
 
             MeshBuilder::AddQuad(vertices, p, uv, n);
         }
