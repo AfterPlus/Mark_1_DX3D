@@ -19,10 +19,12 @@ struct FoliageInstance
     float width;            // sideways scale relative to the height (1 = model's own proportions)
     float phase;            // wind phase, so neighbours do not sway in step
     float stiffness;        // 0 = does not move, 1 = full wind
-    XMFLOAT4 tint;          // rgb colour multiplier (a unused)
+    XMFLOAT3 tint;          // rgb colour multiplier
+    float lodRank;          // 0..1, random. With distance only the instances with a rank below the kept share are drawn,
+                            // so a chunk's instances must be sorted by it (the kept ones are then a prefix of the range)
 };
 
-// Wind and fade settings for a frame of foliage.
+// Wind, fade and level-of-detail settings for a frame of foliage.
 struct FoliageWind
 {
     XMFLOAT2 direction;     // XZ, normalised
@@ -31,10 +33,29 @@ struct FoliageWind
     float time;             // seconds, keeps running
     float fadeStart;        // metres from the camera where the grass starts shrinking away ...
     float fadeEnd;          // ... and where it is gone
+    float lodMinKeep;       // smallest share of instances kept far away (0..1)
+    float lodMaxWiden;      // thinned-out instances get up to this much wider, so the far field still looks full
 };
 
+// The share of a model's instances drawn at `distance` metres from the camera: all of them up to the model's
+// lodDistance, then falling with the square of the distance (so the number on screen per pixel stays about the same).
+// FoliageVS.HLSL uses the same formula per instance.
+inline float FoliageKeepShare(float distance, float lodDistance, float minKeep)
+{
+    float share;
+
+    if(distance <= lodDistance)
+    {
+        return 1.0f;
+    }
+
+    share = (lodDistance / distance) * (lodDistance / distance);
+
+    return share > minKeep ? share : minKeep;
+}
+
 // Draws many copies of a model in one call (instancing), cut out by the texture's alpha, both sides, bent by the wind.
-// Use: Begin (uploads every instance of the frame once) -> Draw per model -> End (restores the render states).
+// Use: SetInstances (only when they changed) -> Begin -> per model: SetModel, then Draw ranges -> End (restores states).
 class FoliageShaderClass
 {
 private:
@@ -50,6 +71,14 @@ private:
         float windSpeed;
         float fadeStart;
         float fadeEnd;
+        float lodMinKeep;
+        float lodMaxWiden;
+        float padding;
+    };
+
+    struct ModelBufferType
+    {
+        float lodDistance;
         XMFLOAT3 padding;
     };
 
@@ -63,15 +92,19 @@ public:
     FoliageShaderClass();
     ~FoliageShaderClass();
 
-    bool Initialize(ID3D11Device*, HWND, int maxInstances);
+    bool Initialize(ID3D11Device*, HWND);
     void Shutdown();
 
-    // Instances beyond maxInstances are dropped.
-    bool Begin(ID3D11DeviceContext*, const FoliageInstance* instances, int instanceCount, XMMATRIX viewMatrix, XMMATRIX projectionMatrix,
+    // Uploads every instance once; the buffer grows when needed. Call only when the instances changed.
+    bool SetInstances(ID3D11Device*, ID3D11DeviceContext*, const FoliageInstance* instances, int instanceCount);
+
+    bool Begin(ID3D11DeviceContext*, XMMATRIX viewMatrix, XMMATRIX projectionMatrix,
                XMFLOAT3 cameraPosition, XMFLOAT3 lightPosition, XMFLOAT4 ambientColor, XMFLOAT4 diffuseColor,
                const FoliageWind& wind, ID3D11ShaderResourceView* shadowTexture);
-    // Draws instances [firstInstance, firstInstance + instanceCount) of the ones given to Begin, as copies of model.
-    void Draw(ID3D11DeviceContext*, ModelClass* model, int firstInstance, int instanceCount);
+    // Binds the model's mesh and texture for the Draw calls that follow.
+    bool SetModel(ID3D11DeviceContext*, ModelClass* model, float lodDistance);
+    // Draws instances [firstInstance, firstInstance + instanceCount) of the uploaded ones as copies of the current model.
+    void Draw(ID3D11DeviceContext*, int firstInstance, int instanceCount);
     void End(ID3D11DeviceContext*);
 
 private:
@@ -84,6 +117,7 @@ private:
     ID3D11PixelShader* m_pixelShader;
     ID3D11InputLayout* m_layout;
     ID3D11Buffer* m_frameBuffer;
+    ID3D11Buffer* m_modelBuffer;
     ID3D11Buffer* m_lightBuffer;
     ID3D11Buffer* m_instanceBuffer;
     ID3D11SamplerState* m_sampleStateClamp;
@@ -96,8 +130,9 @@ private:
     FLOAT m_previousBlendFactor[4];
     UINT m_previousSampleMask;
 
-    int m_maxInstances;
+    int m_instanceCapacity;
     int m_instanceCount;
+    int m_modelIndexCount;
 };
 
 #endif

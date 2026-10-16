@@ -6,6 +6,7 @@ FoliageShaderClass::FoliageShaderClass()
     m_pixelShader = nullptr;
     m_layout = nullptr;
     m_frameBuffer = nullptr;
+    m_modelBuffer = nullptr;
     m_lightBuffer = nullptr;
     m_instanceBuffer = nullptr;
     m_sampleStateClamp = nullptr;
@@ -15,17 +16,17 @@ FoliageShaderClass::FoliageShaderClass()
     m_previousRasterState = nullptr;
     m_previousBlendState = nullptr;
     m_previousSampleMask = 0xffffffff;
-    m_maxInstances = 0;
+    m_instanceCapacity = 0;
     m_instanceCount = 0;
+    m_modelIndexCount = 0;
 }
 
 FoliageShaderClass::~FoliageShaderClass()
 {
 }
 
-bool FoliageShaderClass::Initialize(ID3D11Device* device, HWND hwnd, int maxInstances)
+bool FoliageShaderClass::Initialize(ID3D11Device* device, HWND hwnd)
 {
-    D3D11_BUFFER_DESC instanceBufferDesc;
     D3D11_RASTERIZER_DESC rasterDesc;
     D3D11_BLEND_DESC blendDesc;
     wchar_t vsFilename[128], psFilename[128];
@@ -35,22 +36,6 @@ bool FoliageShaderClass::Initialize(ID3D11Device* device, HWND hwnd, int maxInst
     wcscpy_s(psFilename, 128, L"_Shader/FoliagePS.HLSL");
 
     if(!InitializeShader(device, hwnd, vsFilename, psFilename))
-    {
-        return false;
-    }
-
-    // Per-instance data, rewritten every frame.
-    m_maxInstances = maxInstances;
-
-    instanceBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
-    instanceBufferDesc.ByteWidth = sizeof(FoliageInstance) * maxInstances;
-    instanceBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    instanceBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    instanceBufferDesc.MiscFlags = 0;
-    instanceBufferDesc.StructureByteStride = 0;
-
-    result = device->CreateBuffer(&instanceBufferDesc, NULL, &m_instanceBuffer);
-    if(FAILED(result))
     {
         return false;
     }
@@ -113,38 +98,75 @@ void FoliageShaderClass::Shutdown()
         m_instanceBuffer = nullptr;
     }
 
+    m_instanceCapacity = 0;
+    m_instanceCount = 0;
+
     ShutdownShader();
 }
 
-bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, const FoliageInstance* instances, int instanceCount, XMMATRIX viewMatrix, XMMATRIX projectionMatrix,
+bool FoliageShaderClass::SetInstances(ID3D11Device* device, ID3D11DeviceContext* deviceContext, const FoliageInstance* instances, int instanceCount)
+{
+    D3D11_BUFFER_DESC instanceBufferDesc;
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    HRESULT result;
+
+    m_instanceCount = 0;
+
+    if(instanceCount <= 0)
+    {
+        return true;
+    }
+
+    // Grow (with room to spare, so a few more instances next time do not recreate it again).
+    if(instanceCount > m_instanceCapacity)
+    {
+        if(m_instanceBuffer)
+        {
+            m_instanceBuffer->Release();
+            m_instanceBuffer = nullptr;
+        }
+
+        m_instanceCapacity = instanceCount + instanceCount / 2;
+
+        instanceBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+        instanceBufferDesc.ByteWidth = sizeof(FoliageInstance) * m_instanceCapacity;
+        instanceBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        instanceBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        instanceBufferDesc.MiscFlags = 0;
+        instanceBufferDesc.StructureByteStride = 0;
+
+        result = device->CreateBuffer(&instanceBufferDesc, NULL, &m_instanceBuffer);
+        if(FAILED(result))
+        {
+            m_instanceCapacity = 0;
+            return false;
+        }
+    }
+
+    result = deviceContext->Map(m_instanceBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
+    if(FAILED(result))
+    {
+        return false;
+    }
+
+    memcpy(mappedResource.pData, instances, sizeof(FoliageInstance) * instanceCount);
+
+    deviceContext->Unmap(m_instanceBuffer, 0);
+
+    m_instanceCount = instanceCount;
+
+    return true;
+}
+
+bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, XMMATRIX viewMatrix, XMMATRIX projectionMatrix,
                                XMFLOAT3 cameraPosition, XMFLOAT3 lightPosition, XMFLOAT4 ambientColor, XMFLOAT4 diffuseColor,
                                const FoliageWind& wind, ID3D11ShaderResourceView* shadowTexture)
 {
     D3D11_MAPPED_SUBRESOURCE mappedResource;
     FrameBufferType* frame;
     LightBufferType* light;
+    unsigned int stride, offset;
     HRESULT result;
-
-    if(instanceCount > m_maxInstances)
-    {
-        instanceCount = m_maxInstances;
-    }
-
-    m_instanceCount = instanceCount;
-
-    // Every instance of the frame in one upload.
-    if(instanceCount > 0)
-    {
-        result = deviceContext->Map(m_instanceBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
-        if(FAILED(result))
-        {
-            return false;
-        }
-
-        memcpy(mappedResource.pData, instances, sizeof(FoliageInstance) * instanceCount);
-
-        deviceContext->Unmap(m_instanceBuffer, 0);
-    }
 
     // Vertex shader constants.
     result = deviceContext->Map(m_frameBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
@@ -164,11 +186,14 @@ bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, const Foliage
     frame->windSpeed = wind.speed;
     frame->fadeStart = wind.fadeStart;
     frame->fadeEnd = wind.fadeEnd;
-    frame->padding = XMFLOAT3(0.0f, 0.0f, 0.0f);
+    frame->lodMinKeep = wind.lodMinKeep;
+    frame->lodMaxWiden = wind.lodMaxWiden;
+    frame->padding = 0.0f;
 
     deviceContext->Unmap(m_frameBuffer, 0);
 
     deviceContext->VSSetConstantBuffers(0, 1, &m_frameBuffer);
+    deviceContext->VSSetConstantBuffers(1, 1, &m_modelBuffer);
 
     // Pixel shader constants.
     result = deviceContext->Map(m_lightBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
@@ -184,13 +209,19 @@ bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, const Foliage
     deviceContext->Unmap(m_lightBuffer, 0);
 
     deviceContext->PSSetConstantBuffers(0, 1, &m_lightBuffer);
-    deviceContext->PSSetShaderResources(1, 1, &shadowTexture);
+
+    // The shadow is looked up once per vertex (at the instance's root), not per pixel.
+    deviceContext->VSSetShaderResources(1, 1, &shadowTexture);
+    deviceContext->VSSetSamplers(0, 1, &m_sampleStateClamp);
 
     deviceContext->IASetInputLayout(m_layout);
     deviceContext->VSSetShader(m_vertexShader, NULL, 0);
     deviceContext->PSSetShader(m_pixelShader, NULL, 0);
-    deviceContext->PSSetSamplers(0, 1, &m_sampleStateClamp);
     deviceContext->PSSetSamplers(1, 1, &m_sampleStateWrap);
+
+    stride = sizeof(FoliageInstance);
+    offset = 0;
+    deviceContext->IASetVertexBuffers(1, 1, &m_instanceBuffer, &stride, &offset);
 
     // Remember the scene's states, then switch to two-sided + alpha-to-coverage.
     deviceContext->RSGetState(&m_previousRasterState);
@@ -202,12 +233,38 @@ bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, const Foliage
     return true;
 }
 
-void FoliageShaderClass::Draw(ID3D11DeviceContext* deviceContext, ModelClass* model, int firstInstance, int instanceCount)
+bool FoliageShaderClass::SetModel(ID3D11DeviceContext* deviceContext, ModelClass* model, float lodDistance)
 {
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    ModelBufferType* data;
     ID3D11ShaderResourceView* texture;
-    unsigned int stride, offset;
+    HRESULT result;
 
-    if(firstInstance >= m_instanceCount || instanceCount <= 0)
+    result = deviceContext->Map(m_modelBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
+    if(FAILED(result))
+    {
+        return false;
+    }
+
+    data = (ModelBufferType*)mappedResource.pData;
+    data->lodDistance = lodDistance;
+    data->padding = XMFLOAT3(0.0f, 0.0f, 0.0f);
+
+    deviceContext->Unmap(m_modelBuffer, 0);
+
+    // Slot 0: the model's vertices / indices (ModelClass binds them). Slot 1 (the instances) stays bound from Begin.
+    model->Render(deviceContext);
+    m_modelIndexCount = model->GetIndexCount();
+
+    texture = model->GetTexture(0);
+    deviceContext->PSSetShaderResources(0, 1, &texture);
+
+    return true;
+}
+
+void FoliageShaderClass::Draw(ID3D11DeviceContext* deviceContext, int firstInstance, int instanceCount)
+{
+    if(firstInstance < 0 || firstInstance >= m_instanceCount || instanceCount <= 0)
     {
         return;
     }
@@ -217,30 +274,24 @@ void FoliageShaderClass::Draw(ID3D11DeviceContext* deviceContext, ModelClass* mo
         instanceCount = m_instanceCount - firstInstance;
     }
 
-    // Slot 0: the model's vertices / indices (ModelClass binds them). Slot 1: the instances.
-    model->Render(deviceContext);
-
-    stride = sizeof(FoliageInstance);
-    offset = 0;
-    deviceContext->IASetVertexBuffers(1, 1, &m_instanceBuffer, &stride, &offset);
-
-    texture = model->GetTexture(0);
-    deviceContext->PSSetShaderResources(0, 1, &texture);
-
-    deviceContext->DrawIndexedInstanced(model->GetIndexCount(), instanceCount, 0, 0, firstInstance);
+    deviceContext->DrawIndexedInstanced(m_modelIndexCount, instanceCount, 0, 0, firstInstance);
 }
 
 void FoliageShaderClass::End(ID3D11DeviceContext* deviceContext)
 {
     ID3D11Buffer* noBuffer = nullptr;
+    ID3D11ShaderResourceView* noTexture = nullptr;
     unsigned int zero = 0;
 
     deviceContext->IASetVertexBuffers(1, 1, &noBuffer, &zero, &zero);
 
+    // The shadow texture is a render target again next frame.
+    deviceContext->VSSetShaderResources(1, 1, &noTexture);
+
     deviceContext->RSSetState(m_previousRasterState);
     deviceContext->OMSetBlendState(m_previousBlendState, m_previousBlendFactor, m_previousSampleMask);
 
-    // The Get calls above added a reference.
+    // The Get calls in Begin added a reference.
     if(m_previousRasterState)
     {
         m_previousRasterState->Release();
@@ -339,7 +390,7 @@ bool FoliageShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WCHAR
     polygonLayout[2].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
     polygonLayout[2].InstanceDataStepRate = 0;
 
-    // Slot 1: one FoliageInstance per copy -> TEXCOORD1 (position, yaw), TEXCOORD2 (height, width, phase, stiffness), TEXCOORD3 (tint).
+    // Slot 1: one FoliageInstance per copy -> TEXCOORD1 (position, yaw), TEXCOORD2 (height, width, phase, stiffness), TEXCOORD3 (tint, LOD rank).
     for(i=3; i<6; i++)
     {
         polygonLayout[i].SemanticName = "TEXCOORD";
@@ -374,6 +425,14 @@ bool FoliageShaderClass::InitializeShader(ID3D11Device* device, HWND hwnd, WCHAR
     bufferDesc.StructureByteStride = 0;
 
     result = device->CreateBuffer(&bufferDesc, NULL, &m_frameBuffer);
+    if(FAILED(result))
+    {
+        return false;
+    }
+
+    bufferDesc.ByteWidth = sizeof(ModelBufferType);
+
+    result = device->CreateBuffer(&bufferDesc, NULL, &m_modelBuffer);
     if(FAILED(result))
     {
         return false;
@@ -439,6 +498,12 @@ void FoliageShaderClass::ShutdownShader()
     {
         m_lightBuffer->Release();
         m_lightBuffer = nullptr;
+    }
+
+    if(m_modelBuffer)
+    {
+        m_modelBuffer->Release();
+        m_modelBuffer = nullptr;
     }
 
     if(m_frameBuffer)

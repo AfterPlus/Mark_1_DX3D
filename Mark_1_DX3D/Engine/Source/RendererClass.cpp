@@ -1,4 +1,5 @@
 #include "RendererClass.h"
+#include <algorithm>
 
 RendererClass::RendererClass()
 {
@@ -12,6 +13,8 @@ RendererClass::RendererClass()
     m_ShadowShader = nullptr;
     m_SoftShadowShader = nullptr;
     m_FoliageShader = nullptr;
+    m_foliageVersion = 0;
+    m_foliageUploaded = nullptr;
     m_shadowMapBias = 0.0f;
     m_shadowBiasMeters = 0.0f;
     m_lightNear = 0.0f;
@@ -115,7 +118,7 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
 
     m_FoliageShader = new FoliageShaderClass;
 
-    result = m_FoliageShader->Initialize(m_Direct3D->GetDevice(), hwnd, MAX_FOLIAGE_INSTANCES);
+    result = m_FoliageShader->Initialize(m_Direct3D->GetDevice(), hwnd);
     if(!result)
     {
         MessageBox(hwnd, L"Could not initialize the foliage shader object.", L"Error", MB_OK);
@@ -300,7 +303,7 @@ bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderIte
     }
 
     // Pass 4: foliage on top of the lit scene (it uses the depth buffer the scene just wrote).
-    if(foliage && !foliage->batches.empty())
+    if(foliage && !foliage->chunks.empty())
     {
         result = RenderFoliage(camera, *foliage);
         if(!result)
@@ -312,34 +315,95 @@ bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderIte
     return true;
 }
 
-// Every batch's instances go into one buffer, then one instanced draw per model.
+// The instances live on the GPU and are re-uploaded only when the scene's version changes. Each frame every chunk is
+// checked against the view frustum (cut off at the fade distance), and of the visible ones only the share its distance
+// keeps is drawn: chunks are sorted by LOD rank, so that share is the start of the chunk's range.
 bool RendererClass::RenderFoliage(CameraClass* camera, const FoliageScene& foliage)
 {
     ID3D11DeviceContext* context = m_Direct3D->GetDeviceContext();
     XMMATRIX viewMatrix, projectionMatrix;
     XMFLOAT4 lightPosition;
+    XMFLOAT3 cameraPosition;
+    FoliageDraw draw;
+    float dx, dz, distance, keep;
     size_t i;
-    int first;
+    int currentModel;
     bool result;
 
-    m_foliageInstances.clear();
-
-    for(i=0; i<foliage.batches.size(); i++)
+    if(m_foliageUploaded != &foliage || m_foliageVersion != foliage.version)
     {
-        m_foliageInstances.insert(m_foliageInstances.end(), foliage.batches[i].instances.begin(), foliage.batches[i].instances.end());
-    }
+        result = m_FoliageShader->SetInstances(m_Direct3D->GetDevice(), context, foliage.instances.data(), (int)foliage.instances.size());
+        if(!result)
+        {
+            return false;
+        }
 
-    if(m_foliageInstances.empty())
-    {
-        return true;
+        m_foliageUploaded = &foliage;
+        m_foliageVersion = foliage.version;
     }
 
     camera->GetViewMatrix(viewMatrix);
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
+    cameraPosition = camera->GetPosition();
+
+    // Nothing is drawn past the fade distance, so that is the far plane for the test.
+    m_foliageFrustum.ConstructFrustum(viewMatrix, projectionMatrix, foliage.wind.fadeEnd);
+
+    m_foliageDraws.clear();
+
+    for(i=0; i<foliage.chunks.size(); i++)
+    {
+        const FoliageChunk& chunk = foliage.chunks[i];
+
+        if(chunk.count <= 0 || chunk.model < 0 || chunk.model >= (int)foliage.models.size() || !foliage.models[chunk.model].model)
+        {
+            continue;
+        }
+
+        if(!m_foliageFrustum.CheckSphere(chunk.center.x, chunk.center.y, chunk.center.z, chunk.radius))
+        {
+            continue;
+        }
+
+        // The nearest the chunk gets to the camera (on the ground plane, like the shader) keeps the most instances.
+        dx = chunk.center.x - cameraPosition.x;
+        dz = chunk.center.z - cameraPosition.z;
+        distance = sqrtf(dx * dx + dz * dz) - chunk.radius;
+        if(distance < 0.0f)
+        {
+            distance = 0.0f;
+        }
+
+        keep = FoliageKeepShare(distance, foliage.models[chunk.model].lodDistance, foliage.wind.lodMinKeep);
+
+        draw.model = chunk.model;
+        draw.first = chunk.first;
+        draw.count = (int)ceilf((float)chunk.count * keep);
+        draw.distance = distance;
+
+        if(draw.count > chunk.count)
+        {
+            draw.count = chunk.count;
+        }
+
+        m_foliageDraws.push_back(draw);
+    }
+
+    if(m_foliageDraws.empty())
+    {
+        return true;
+    }
+
+    // Grouped by model (one mesh bind each), near to far inside a model so the depth test rejects more hidden blades.
+    std::sort(m_foliageDraws.begin(), m_foliageDraws.end(), [](const FoliageDraw& a, const FoliageDraw& b)
+    {
+        return a.model != b.model ? a.model < b.model : a.distance < b.distance;
+    });
+
     lightPosition = m_ProjectionLight->GetPosition();
 
-    result = m_FoliageShader->Begin(context, m_foliageInstances.data(), (int)m_foliageInstances.size(), viewMatrix, projectionMatrix,
-                                    camera->GetPosition(), XMFLOAT3(lightPosition.x, lightPosition.y, lightPosition.z),
+    result = m_FoliageShader->Begin(context, viewMatrix, projectionMatrix, cameraPosition,
+                                    XMFLOAT3(lightPosition.x, lightPosition.y, lightPosition.z),
                                     m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
                                     foliage.wind, m_BlackWhiteRenderTexture->GetShaderResourceView());
     if(!result)
@@ -347,16 +411,23 @@ bool RendererClass::RenderFoliage(CameraClass* camera, const FoliageScene& folia
         return false;
     }
 
-    first = 0;
+    currentModel = -1;
 
-    for(i=0; i<foliage.batches.size(); i++)
+    for(i=0; i<m_foliageDraws.size(); i++)
     {
-        if(foliage.batches[i].model)
+        if(m_foliageDraws[i].model != currentModel)
         {
-            m_FoliageShader->Draw(context, foliage.batches[i].model, first, (int)foliage.batches[i].instances.size());
+            currentModel = m_foliageDraws[i].model;
+
+            result = m_FoliageShader->SetModel(context, foliage.models[currentModel].model, foliage.models[currentModel].lodDistance);
+            if(!result)
+            {
+                m_FoliageShader->End(context);
+                return false;
+            }
         }
 
-        first += (int)foliage.batches[i].instances.size();
+        m_FoliageShader->Draw(context, m_foliageDraws[i].first, m_foliageDraws[i].count);
     }
 
     m_FoliageShader->End(context);

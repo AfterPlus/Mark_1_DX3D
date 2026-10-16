@@ -14,6 +14,7 @@
 #include "SoftShadowShaderClass.h"
 #include "AssetManager.h"
 #include "FoliageShaderClass.h"
+#include "FrustumClass.h"
 
 const bool VSYNC_ENABLED = true;
 const float SCREEN_DEPTH = 1000.0f;
@@ -23,8 +24,6 @@ const int SHADOWMAP_HEIGHT = 1024;
 // MSAA samples per pixel for the main scene (1 = off, 2/4/8 = smoother edges, more GPU cost).
 // If the GPU does not support the requested count, D3dClass falls back to the next lower one.
 const int MSAA_SAMPLE_COUNT = 4;
-// Most foliage copies (grass tufts ...) drawn in one frame; more are dropped.
-const int MAX_FOLIAGE_INSTANCES = 65536;
 
 // One thing to draw: which model, and where it is in the world.
 // Stored as XMFLOAT4X4 (not XMMATRIX) so it is safe to keep inside std::vector.
@@ -35,17 +34,29 @@ struct RenderItem
     bool castsShadow = true;        // false = left out of the shadow map (still receives shadows)
 };
 
-// Many copies of one foliage model (instanced, alpha cut-out, swaying in the wind). Foliage does not cast shadows,
+// Foliage: many copies of a few models (instanced, alpha cut-out, swaying in the wind). Foliage does not cast shadows,
 // it takes the shadow of the ground it stands on.
-struct FoliageBatch
+struct FoliageModel
 {
-    ModelClass* model;
-    std::vector<FoliageInstance> instances;
+    ModelClass* model;      // nullptr = not loaded, its chunks are skipped
+    float lodDistance;      // metres from the camera where its instances start thinning out (smaller for heavy models)
+};
+
+// A patch of instances of one model that is culled and thinned as a whole.
+struct FoliageChunk
+{
+    int model;              // index into FoliageScene::models
+    int first, count;       // range in FoliageScene::instances, sorted by lodRank (lowest first)
+    XMFLOAT3 center;        // bounding sphere of the whole patch (roots and tips)
+    float radius;
 };
 
 struct FoliageScene
 {
-    std::vector<FoliageBatch> batches;
+    std::vector<FoliageModel> models;
+    std::vector<FoliageInstance> instances;
+    std::vector<FoliageChunk> chunks;
+    unsigned int version = 0;   // change it whenever instances / chunks change: the renderer re-uploads them only then
     FoliageWind wind;
 };
 
@@ -92,7 +103,11 @@ private:
     ShadowShaderClass* m_ShadowShader;
     SoftShadowShaderClass* m_SoftShadowShader;
     FoliageShaderClass* m_FoliageShader;
-    std::vector<FoliageInstance> m_foliageInstances;     // every batch's instances back to back, uploaded once per frame
+    unsigned int m_foliageVersion;              // FoliageScene::version that is on the GPU
+    const FoliageScene* m_foliageUploaded;      // ... and which scene it came from
+    FrustumClass m_foliageFrustum;
+    struct FoliageDraw { int model; int first; int count; float distance; };
+    std::vector<FoliageDraw> m_foliageDraws;    // this frame's visible chunks (kept to avoid reallocating)
     float m_shadowMapBias;      // in shadow-map depth (z/w) units, derived from m_shadowBiasMeters
     float m_shadowBiasMeters;   // how far (world metres) a surface may be behind the shadow map and still count as lit
     float m_lightNear;
