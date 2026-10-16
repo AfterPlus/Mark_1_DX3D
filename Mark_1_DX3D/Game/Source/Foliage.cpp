@@ -22,14 +22,14 @@ static const float WIND_ANGLE_DRIFT = 0.35f;
 static const float WIND_STRENGTH = 0.28f;
 static const float WIND_SPEED = 1.8f;
 
-// Far grass shrinks away between these distances from the camera (the placed stretch reaches a bit further).
-static const float FADE_START = 115.0f;         // must stay below FADE_END
-static const float FADE_END = 150.0f;
+// Far grass shrinks away between these distances from the camera. The grass is placed up to GRASS_AHEAD (DrivingGame.cpp)
+// metres in front of the car, and the camera is ~9 m behind the car, so FADE_END must stay below GRASS_AHEAD + 9.
+static const float FADE_START = 290.0f;         // must stay below FADE_END
+static const float FADE_END = 360.0f;
 
 // Level of detail: past a model's lodDistance only (lodDistance / distance)^2 of its instances are drawn, never less
-// than LOD_MIN_KEEP, and the ones left are made up to LOD_MAX_WIDEN times wider to fill the gaps.
-static const float LOD_MIN_KEEP = 0.02f;
-static const float LOD_MAX_WIDEN = 2.5f;
+// than the model's lodMinKeep, and the ones left are made up to LOD_MAX_WIDEN times wider to fill the gaps.
+static const float LOD_MAX_WIDEN = 3.0f;
 
 // Small integer hash -> well-mixed bits. Same input, same output, on every run.
 static unsigned int Hash(unsigned int x)
@@ -81,16 +81,17 @@ static bool ByLodRank(const FoliageInstance& a, const FoliageInstance& b)
 
 Foliage::Foliage()
 {
-    // name, tufts per metre per side, height range (m), width scale range, LOD distance (m).
-    // Clumps are ~10x the triangles of a blade, so they thin out much closer to the camera.
+    // name, tufts per metre per side, height range (m), width scale range, LOD distance (m), LOD min share.
+    // Clumps are ~10x the triangles of a blade, so they thin out closer and almost vanish far away; the cheap blades
+    // carry the far field.
     FoliageType types[TYPE_COUNT] =
     {
-        { "grass_clump_01", 100.0f, 0.35f, 0.85f, 0.8f, 1.3f, 12.0f, nullptr },
-        { "grass_clump_02", 100.0f, 0.30f, 0.75f, 0.8f, 1.3f, 12.0f, nullptr },
-        { "grass_clump_03", 100.0f, 0.40f, 0.95f, 0.8f, 1.2f, 12.0f, nullptr },
-        { "grass_blade_01", 120.0f, 0.30f, 0.90f, 0.8f, 1.6f, 20.0f, nullptr },
-        { "grass_blade_02",  90.0f, 0.25f, 0.75f, 0.8f, 1.6f, 20.0f, nullptr },
-        { "grass_blade_03",  60.0f, 0.35f, 1.10f, 0.8f, 1.6f, 20.0f, nullptr },
+        { "grass_clump_01", 100.0f, 0.35f, 0.85f, 0.8f, 1.3f, 12.0f, 0.004f, nullptr },
+        { "grass_clump_02", 100.0f, 0.30f, 0.75f, 0.8f, 1.3f, 12.0f, 0.004f, nullptr },
+        { "grass_clump_03", 100.0f, 0.40f, 0.95f, 0.8f, 1.2f, 12.0f, 0.004f, nullptr },
+        { "grass_blade_01", 120.0f, 0.30f, 0.90f, 0.8f, 1.6f, 20.0f, 0.03f, nullptr },
+        { "grass_blade_02",  90.0f, 0.25f, 0.75f, 0.8f, 1.6f, 20.0f, 0.03f, nullptr },
+        { "grass_blade_03",  60.0f, 0.35f, 1.10f, 0.8f, 1.6f, 20.0f, 0.03f, nullptr },
     };
     int i;
 
@@ -101,6 +102,7 @@ Foliage::Foliage()
 
     m_textureLoaded = false;
     m_ready = false;
+    m_slotSize = 0;
     m_time = 0.0f;
 }
 
@@ -121,6 +123,7 @@ bool Foliage::Initialize(RendererClass* renderer)
 
     // Every model shares the one grass texture.
     loaded = 0;
+    m_slotSize = 0;
 
     m_scene.models.resize(TYPE_COUNT);
 
@@ -139,10 +142,14 @@ bool Foliage::Initialize(RendererClass* renderer)
         else
         {
             loaded++;
+
+            // A cell places at most density rounded up of each model.
+            m_slotSize += ((int)m_types[i].density + 1) * CHUNK_CELLS;
         }
 
         m_scene.models[i].model = m_types[i].model;
         m_scene.models[i].lodDistance = m_types[i].lodDistance;
+        m_scene.models[i].lodMinKeep = m_types[i].lodMinKeep;
     }
 
     m_ready = loaded > 0;
@@ -157,9 +164,11 @@ void Foliage::Shutdown()
     int i;
 
     m_chunks.clear();
+    m_freeSlots.clear();
     m_scene.models.clear();
     m_scene.instances.clear();
     m_scene.chunks.clear();
+    m_scene.changed.clear();
 
     for(i=0; i<TYPE_COUNT; i++)
     {
@@ -214,6 +223,7 @@ void Foliage::Rebuild(const Road& road, float startS, float endS)
 
         if(slice < firstSlice || slice > lastSlice)
         {
+            m_freeSlots.push_back(it->second.slot);
             it = m_chunks.erase(it);
             changed = true;
         }
@@ -232,7 +242,10 @@ void Foliage::Rebuild(const Road& road, float startS, float endS)
 
             if(m_chunks.find(key) == m_chunks.end())
             {
-                BuildChunk(road, slice, side, m_chunks[key]);
+                Chunk& chunk = m_chunks[key];
+
+                chunk.slot = AllocateSlot();
+                BuildChunk(road, slice, side, chunk);
                 changed = true;
             }
         }
@@ -240,21 +253,50 @@ void Foliage::Rebuild(const Road& road, float startS, float endS)
 
     if(changed)
     {
-        Flatten();
+        UpdateChunkList();
     }
+}
+
+// A free slot of the instance buffer, or a new one at the end (which makes the renderer upload everything once).
+int Foliage::AllocateSlot()
+{
+    int slot;
+
+    if(!m_freeSlots.empty())
+    {
+        slot = m_freeSlots.back();
+        m_freeSlots.pop_back();
+        return slot;
+    }
+
+    slot = (int)(m_scene.instances.size() / m_slotSize);
+    m_scene.instances.resize((size_t)(slot + 1) * m_slotSize);
+
+    return slot;
 }
 
 void Foliage::BuildChunk(const Road& road, int slice, int side, Chunk& chunk)
 {
+    FoliageRange range;
     XMFLOAT3 low, high;
     float top;
-    int cell, band, type;
+    int cell, band, type, next;
     size_t i;
+
+    for(band=0; band<BAND_COUNT; band++)
+    {
+        for(type=0; type<TYPE_COUNT; type++)
+        {
+            m_build[band][type].clear();
+        }
+    }
 
     for(cell=slice * CHUNK_CELLS; cell<(slice + 1) * CHUNK_CELLS; cell++)
     {
-        PlaceCell(road, cell, side, chunk);
+        PlaceCell(road, cell, side);
     }
+
+    next = chunk.slot * m_slotSize;
 
     for(band=0; band<BAND_COUNT; band++)
     {
@@ -264,10 +306,19 @@ void Foliage::BuildChunk(const Road& road, int slice, int side, Chunk& chunk)
 
         for(type=0; type<TYPE_COUNT; type++)
         {
-            std::vector<FoliageInstance>& list = chunk.instances[band][type];
+            std::vector<FoliageInstance>& list = m_build[band][type];
 
             // Lowest rank first: the renderer draws the first N of a chunk when it thins it out.
             std::sort(list.begin(), list.end(), ByLodRank);
+
+            // Into the chunk's slot.
+            chunk.first[band][type] = next;
+            chunk.count[band][type] = (int)list.size();
+            if(!list.empty())
+            {
+                memcpy(&m_scene.instances[next], list.data(), sizeof(FoliageInstance) * list.size());
+            }
+            next += (int)list.size();
 
             for(i=0; i<list.size(); i++)
             {
@@ -295,10 +346,18 @@ void Foliage::BuildChunk(const Road& road, int slice, int side, Chunk& chunk)
         chunk.radius[band] = 0.5f * sqrtf((high.x - low.x) * (high.x - low.x) + (high.y - low.y) * (high.y - low.y) +
                                           (high.z - low.z) * (high.z - low.z)) + top * LOD_MAX_WIDEN;
     }
+
+    // Only this slot needs to go to the GPU.
+    range.first = chunk.slot * m_slotSize;
+    range.count = next - range.first;
+    if(range.count > 0)
+    {
+        m_scene.changed.push_back(range);
+    }
 }
 
 // The grass of one 1 m cell of road on one side (-1 = left, +1 = right).
-void Foliage::PlaceCell(const Road& road, int cell, int side, Chunk& chunk)
+void Foliage::PlaceCell(const Road& road, int cell, int side)
 {
     FoliageInstance instance;
     CellRandom random;
@@ -362,33 +421,18 @@ void Foliage::PlaceCell(const Road& road, int cell, int side, Chunk& chunk)
 
             band = edge < BAND_EDGES[0] ? 0 : (edge < BAND_EDGES[1] ? 1 : 2);
 
-            chunk.instances[band][type].push_back(instance);
+            m_build[band][type].push_back(instance);
         }
     }
 }
 
-// Lays every chunk's instances out back to back for the renderer (one GPU upload), one FoliageChunk per band and model.
-void Foliage::Flatten()
+// The renderer's list of what to draw: one FoliageChunk per chunk, band and model. Small; the instances stay in place.
+void Foliage::UpdateChunkList()
 {
     std::map<int, Chunk>::iterator it;
     FoliageChunk entry;
-    size_t total;
     int band, type;
 
-    total = 0;
-    for(it = m_chunks.begin(); it != m_chunks.end(); ++it)
-    {
-        for(band=0; band<BAND_COUNT; band++)
-        {
-            for(type=0; type<TYPE_COUNT; type++)
-            {
-                total += it->second.instances[band][type].size();
-            }
-        }
-    }
-
-    m_scene.instances.clear();
-    m_scene.instances.reserve(total);
     m_scene.chunks.clear();
 
     for(it = m_chunks.begin(); it != m_chunks.end(); ++it)
@@ -397,26 +441,21 @@ void Foliage::Flatten()
         {
             for(type=0; type<TYPE_COUNT; type++)
             {
-                const std::vector<FoliageInstance>& list = it->second.instances[band][type];
-
-                if(list.empty())
+                if(it->second.count[band][type] == 0)
                 {
                     continue;
                 }
 
                 entry.model = type;
-                entry.first = (int)m_scene.instances.size();
-                entry.count = (int)list.size();
+                entry.first = it->second.first[band][type];
+                entry.count = it->second.count[band][type];
                 entry.center = it->second.center[band];
                 entry.radius = it->second.radius[band];
 
                 m_scene.chunks.push_back(entry);
-                m_scene.instances.insert(m_scene.instances.end(), list.begin(), list.end());
             }
         }
     }
-
-    m_scene.version++;
 }
 
 void Foliage::Update(float dt)
@@ -433,11 +472,10 @@ void Foliage::Update(float dt)
     m_scene.wind.time = m_time;
     m_scene.wind.fadeStart = FADE_START;
     m_scene.wind.fadeEnd = FADE_END;
-    m_scene.wind.lodMinKeep = LOD_MIN_KEEP;
     m_scene.wind.lodMaxWiden = LOD_MAX_WIDEN;
 }
 
-const FoliageScene* Foliage::GetScene() const
+FoliageScene* Foliage::GetScene()
 {
     return m_ready ? &m_scene : nullptr;
 }

@@ -26,8 +26,9 @@ static const float POST_SPACING = 18.0f;
 static const float POST_OFFSET = ROAD_HALF_WIDTH + 1.2f;
 
 // Grass is placed from a little behind the camera to this far ahead of the car (re-placed with the road meshes).
+// The ground mesh reaches ~375 m ahead, so the grass stops just short of its end (and fades out before, see Foliage.cpp).
 static const float GRASS_BEHIND = 25.0f;
-static const float GRASS_AHEAD = 160.0f;
+static const float GRASS_AHEAD = 365.0f;
 
 // Car box: cube.txt is 2 x 2 x 2, so these are half extents -> 1.8 m wide, 1.0 m high, 4.0 m long.
 static const float CAR_HALF_WIDTH = 0.9f;

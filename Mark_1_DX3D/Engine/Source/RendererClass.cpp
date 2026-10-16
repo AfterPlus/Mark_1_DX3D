@@ -13,8 +13,8 @@ RendererClass::RendererClass()
     m_ShadowShader = nullptr;
     m_SoftShadowShader = nullptr;
     m_FoliageShader = nullptr;
-    m_foliageVersion = 0;
     m_foliageUploaded = nullptr;
+    m_foliageUploadedSize = 0;
     m_shadowMapBias = 0.0f;
     m_shadowBiasMeters = 0.0f;
     m_lightNear = 0.0f;
@@ -253,7 +253,7 @@ void RendererClass::UpdateShadowBias()
 }
 
 // Old Application::Render (the 3D half).
-bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderItem>& items, const FoliageScene* foliage)
+bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderItem>& items, FoliageScene* foliage)
 {
     XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
     XMFLOAT4 lightPosition;
@@ -315,10 +315,10 @@ bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderIte
     return true;
 }
 
-// The instances live on the GPU and are re-uploaded only when the scene's version changes. Each frame every chunk is
+// The instances live on the GPU; only new ones are uploaded (FoliageScene::changed). Each frame every chunk is
 // checked against the view frustum (cut off at the fade distance), and of the visible ones only the share its distance
 // keeps is drawn: chunks are sorted by LOD rank, so that share is the start of the chunk's range.
-bool RendererClass::RenderFoliage(CameraClass* camera, const FoliageScene& foliage)
+bool RendererClass::RenderFoliage(CameraClass* camera, FoliageScene& foliage)
 {
     ID3D11DeviceContext* context = m_Direct3D->GetDeviceContext();
     XMMATRIX viewMatrix, projectionMatrix;
@@ -330,7 +330,7 @@ bool RendererClass::RenderFoliage(CameraClass* camera, const FoliageScene& folia
     int currentModel;
     bool result;
 
-    if(m_foliageUploaded != &foliage || m_foliageVersion != foliage.version)
+    if(m_foliageUploaded != &foliage || m_foliageUploadedSize != foliage.instances.size())
     {
         result = m_FoliageShader->SetInstances(m_Direct3D->GetDevice(), context, foliage.instances.data(), (int)foliage.instances.size());
         if(!result)
@@ -339,8 +339,17 @@ bool RendererClass::RenderFoliage(CameraClass* camera, const FoliageScene& folia
         }
 
         m_foliageUploaded = &foliage;
-        m_foliageVersion = foliage.version;
+        m_foliageUploadedSize = foliage.instances.size();
     }
+    else
+    {
+        for(i=0; i<foliage.changed.size(); i++)
+        {
+            m_FoliageShader->UpdateInstances(context, foliage.instances.data(), foliage.changed[i].first, foliage.changed[i].count);
+        }
+    }
+
+    foliage.changed.clear();
 
     camera->GetViewMatrix(viewMatrix);
     m_Direct3D->GetProjectionMatrix(projectionMatrix);
@@ -374,7 +383,7 @@ bool RendererClass::RenderFoliage(CameraClass* camera, const FoliageScene& folia
             distance = 0.0f;
         }
 
-        keep = FoliageKeepShare(distance, foliage.models[chunk.model].lodDistance, foliage.wind.lodMinKeep);
+        keep = FoliageKeepShare(distance, foliage.models[chunk.model].lodDistance, foliage.models[chunk.model].lodMinKeep);
 
         draw.model = chunk.model;
         draw.first = chunk.first;
@@ -419,7 +428,8 @@ bool RendererClass::RenderFoliage(CameraClass* camera, const FoliageScene& folia
         {
             currentModel = m_foliageDraws[i].model;
 
-            result = m_FoliageShader->SetModel(context, foliage.models[currentModel].model, foliage.models[currentModel].lodDistance);
+            result = m_FoliageShader->SetModel(context, foliage.models[currentModel].model, foliage.models[currentModel].lodDistance,
+                                               foliage.models[currentModel].lodMinKeep);
             if(!result)
             {
                 m_FoliageShader->End(context);

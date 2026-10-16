@@ -107,7 +107,6 @@ void FoliageShaderClass::Shutdown()
 bool FoliageShaderClass::SetInstances(ID3D11Device* device, ID3D11DeviceContext* deviceContext, const FoliageInstance* instances, int instanceCount)
 {
     D3D11_BUFFER_DESC instanceBufferDesc;
-    D3D11_MAPPED_SUBRESOURCE mappedResource;
     HRESULT result;
 
     m_instanceCount = 0;
@@ -117,7 +116,8 @@ bool FoliageShaderClass::SetInstances(ID3D11Device* device, ID3D11DeviceContext*
         return true;
     }
 
-    // Grow (with room to spare, so a few more instances next time do not recreate it again).
+    // Grow (with room to spare, so a few more instances next time do not recreate it again). DEFAULT usage, so single
+    // ranges can be replaced later with UpdateSubresource while the GPU may still be drawing last frame's data.
     if(instanceCount > m_instanceCapacity)
     {
         if(m_instanceBuffer)
@@ -128,10 +128,10 @@ bool FoliageShaderClass::SetInstances(ID3D11Device* device, ID3D11DeviceContext*
 
         m_instanceCapacity = instanceCount + instanceCount / 2;
 
-        instanceBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+        instanceBufferDesc.Usage = D3D11_USAGE_DEFAULT;
         instanceBufferDesc.ByteWidth = sizeof(FoliageInstance) * m_instanceCapacity;
         instanceBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-        instanceBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        instanceBufferDesc.CPUAccessFlags = 0;
         instanceBufferDesc.MiscFlags = 0;
         instanceBufferDesc.StructureByteStride = 0;
 
@@ -143,19 +143,30 @@ bool FoliageShaderClass::SetInstances(ID3D11Device* device, ID3D11DeviceContext*
         }
     }
 
-    result = deviceContext->Map(m_instanceBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
-    if(FAILED(result))
-    {
-        return false;
-    }
-
-    memcpy(mappedResource.pData, instances, sizeof(FoliageInstance) * instanceCount);
-
-    deviceContext->Unmap(m_instanceBuffer, 0);
-
     m_instanceCount = instanceCount;
 
+    UpdateInstances(deviceContext, instances, 0, instanceCount);
+
     return true;
+}
+
+void FoliageShaderClass::UpdateInstances(ID3D11DeviceContext* deviceContext, const FoliageInstance* instances, int first, int count)
+{
+    D3D11_BOX box;
+
+    if(!m_instanceBuffer || first < 0 || count <= 0 || first + count > m_instanceCount)
+    {
+        return;
+    }
+
+    box.left = sizeof(FoliageInstance) * first;
+    box.right = sizeof(FoliageInstance) * (first + count);
+    box.top = 0;
+    box.bottom = 1;
+    box.front = 0;
+    box.back = 1;
+
+    deviceContext->UpdateSubresource(m_instanceBuffer, 0, &box, instances + first, 0, 0);
 }
 
 bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, XMMATRIX viewMatrix, XMMATRIX projectionMatrix,
@@ -186,9 +197,8 @@ bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, XMMATRIX view
     frame->windSpeed = wind.speed;
     frame->fadeStart = wind.fadeStart;
     frame->fadeEnd = wind.fadeEnd;
-    frame->lodMinKeep = wind.lodMinKeep;
     frame->lodMaxWiden = wind.lodMaxWiden;
-    frame->padding = 0.0f;
+    frame->padding = XMFLOAT2(0.0f, 0.0f);
 
     deviceContext->Unmap(m_frameBuffer, 0);
 
@@ -233,7 +243,7 @@ bool FoliageShaderClass::Begin(ID3D11DeviceContext* deviceContext, XMMATRIX view
     return true;
 }
 
-bool FoliageShaderClass::SetModel(ID3D11DeviceContext* deviceContext, ModelClass* model, float lodDistance)
+bool FoliageShaderClass::SetModel(ID3D11DeviceContext* deviceContext, ModelClass* model, float lodDistance, float lodMinKeep)
 {
     D3D11_MAPPED_SUBRESOURCE mappedResource;
     ModelBufferType* data;
@@ -248,7 +258,8 @@ bool FoliageShaderClass::SetModel(ID3D11DeviceContext* deviceContext, ModelClass
 
     data = (ModelBufferType*)mappedResource.pData;
     data->lodDistance = lodDistance;
-    data->padding = XMFLOAT3(0.0f, 0.0f, 0.0f);
+    data->lodMinKeep = lodMinKeep;
+    data->padding = XMFLOAT2(0.0f, 0.0f);
 
     deviceContext->Unmap(m_modelBuffer, 0);
 

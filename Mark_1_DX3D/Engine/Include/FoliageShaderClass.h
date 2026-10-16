@@ -33,7 +33,6 @@ struct FoliageWind
     float time;             // seconds, keeps running
     float fadeStart;        // metres from the camera where the grass starts shrinking away ...
     float fadeEnd;          // ... and where it is gone
-    float lodMinKeep;       // smallest share of instances kept far away (0..1)
     float lodMaxWiden;      // thinned-out instances get up to this much wider, so the far field still looks full
 };
 
@@ -55,7 +54,7 @@ inline float FoliageKeepShare(float distance, float lodDistance, float minKeep)
 }
 
 // Draws many copies of a model in one call (instancing), cut out by the texture's alpha, both sides, bent by the wind.
-// Use: SetInstances (only when they changed) -> Begin -> per model: SetModel, then Draw ranges -> End (restores states).
+// Use: SetInstances / UpdateInstances (only when they changed) -> Begin -> per model: SetModel, then Draw ranges -> End.
 class FoliageShaderClass
 {
 private:
@@ -71,15 +70,15 @@ private:
         float windSpeed;
         float fadeStart;
         float fadeEnd;
-        float lodMinKeep;
         float lodMaxWiden;
-        float padding;
+        XMFLOAT2 padding;
     };
 
     struct ModelBufferType
     {
         float lodDistance;
-        XMFLOAT3 padding;
+        float lodMinKeep;
+        XMFLOAT2 padding;
     };
 
     struct LightBufferType
@@ -95,14 +94,16 @@ public:
     bool Initialize(ID3D11Device*, HWND);
     void Shutdown();
 
-    // Uploads every instance once; the buffer grows when needed. Call only when the instances changed.
+    // Uploads every instance; the buffer grows when needed.
     bool SetInstances(ID3D11Device*, ID3D11DeviceContext*, const FoliageInstance* instances, int instanceCount);
+    // Re-uploads only instances [first, first + count) (instances points at instance 0, as for SetInstances).
+    void UpdateInstances(ID3D11DeviceContext*, const FoliageInstance* instances, int first, int count);
 
     bool Begin(ID3D11DeviceContext*, XMMATRIX viewMatrix, XMMATRIX projectionMatrix,
                XMFLOAT3 cameraPosition, XMFLOAT3 lightPosition, XMFLOAT4 ambientColor, XMFLOAT4 diffuseColor,
                const FoliageWind& wind, ID3D11ShaderResourceView* shadowTexture);
     // Binds the model's mesh and texture for the Draw calls that follow.
-    bool SetModel(ID3D11DeviceContext*, ModelClass* model, float lodDistance);
+    bool SetModel(ID3D11DeviceContext*, ModelClass* model, float lodDistance, float lodMinKeep);
     // Draws instances [firstInstance, firstInstance + instanceCount) of the uploaded ones as copies of the current model.
     void Draw(ID3D11DeviceContext*, int firstInstance, int instanceCount);
     void End(ID3D11DeviceContext*);

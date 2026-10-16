@@ -40,6 +40,12 @@ struct FoliageModel
 {
     ModelClass* model;      // nullptr = not loaded, its chunks are skipped
     float lodDistance;      // metres from the camera where its instances start thinning out (smaller for heavy models)
+    float lodMinKeep;       // smallest share of its instances still drawn far away (smaller for heavy models)
+};
+
+struct FoliageRange
+{
+    int first, count;
 };
 
 // A patch of instances of one model that is culled and thinned as a whole.
@@ -51,12 +57,15 @@ struct FoliageChunk
     float radius;
 };
 
+// `instances` is a CPU copy of the GPU instance buffer and may have unused gaps (chunks only reference what is valid).
+// The renderer uploads it all when its size changes (or on first use); otherwise only the `changed` ranges, which it
+// then clears. So the owner writes new instances in place and lists where.
 struct FoliageScene
 {
     std::vector<FoliageModel> models;
     std::vector<FoliageInstance> instances;
     std::vector<FoliageChunk> chunks;
-    unsigned int version = 0;   // change it whenever instances / chunks change: the renderer re-uploads them only then
+    std::vector<FoliageRange> changed;
     FoliageWind wind;
 };
 
@@ -77,7 +86,7 @@ public:
 
     // Shadow passes + the lit scene pass (+ the foliage, if given). Calls BeginScene. Does NOT present,
     // so the HUD can still draw on top before EndFrame().
-    bool RenderScene(CameraClass* camera, const std::vector<RenderItem>& items, const FoliageScene* foliage = nullptr);
+    bool RenderScene(CameraClass* camera, const std::vector<RenderItem>& items, FoliageScene* foliage = nullptr);
     void EndFrame();
 
     // The Hud needs the device / context / ortho matrix.
@@ -90,7 +99,7 @@ private:
     bool RenderDepthToTexture(const std::vector<RenderItem>& items);
     bool RenderBlackAndWhiteShadows(CameraClass* camera, const std::vector<RenderItem>& items);
     void UpdateShadowBias();
-    bool RenderFoliage(CameraClass* camera, const FoliageScene& foliage);
+    bool RenderFoliage(CameraClass* camera, FoliageScene& foliage);
 
 private:
     D3dClass* m_Direct3D;
@@ -103,8 +112,8 @@ private:
     ShadowShaderClass* m_ShadowShader;
     SoftShadowShaderClass* m_SoftShadowShader;
     FoliageShaderClass* m_FoliageShader;
-    unsigned int m_foliageVersion;              // FoliageScene::version that is on the GPU
-    const FoliageScene* m_foliageUploaded;      // ... and which scene it came from
+    const FoliageScene* m_foliageUploaded;      // the scene whose instances are on the GPU ...
+    size_t m_foliageUploadedSize;               // ... and how many there were
     FrustumClass m_foliageFrustum;
     struct FoliageDraw { int model; int first; int count; float distance; };
     std::vector<FoliageDraw> m_foliageDraws;    // this frame's visible chunks (kept to avoid reallocating)
