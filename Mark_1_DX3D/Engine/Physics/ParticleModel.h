@@ -55,8 +55,9 @@ public:
 	float GetInverseMass() const noexcept { return _inverseMass; }
 	float GetFriction() const noexcept { return _frictionMultiplier; }
 
-	void SetMass( float newMass ) noexcept { _mass = newMass; }
-	void SetInverseMass( float value ) noexcept { _inverseMass = 1.0f / value; }
+	// SetMass keeps the inverse mass in step; SetInverseMass takes 1/mass (0 = immovable) and updates the mass to match.
+	void SetMass( float newMass ) noexcept { _mass = newMass; _inverseMass = ( newMass > 0.0f ) ? 1.0f / newMass : 0.0f; }
+	void SetInverseMass( float inverseMass ) noexcept { _inverseMass = inverseMass; _mass = ( inverseMass > 0.0f ) ? 1.0f / inverseMass : 0.0f; }
 	void SetDragFactor( float dragFactor ) noexcept { _drag = dragFactor; }
 	void SetFriction( float friction ) noexcept { _frictionMultiplier = friction; }
 

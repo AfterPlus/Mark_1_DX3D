@@ -82,9 +82,7 @@ Car::Car()
     m_transform = std::make_shared<Physics::Transform>();
     m_body = std::make_shared<Physics::RigidBody>(m_transform);
 
-    // The module's mass setters are two calls: SetMass stores the mass, SetInverseMass takes the MASS and inverts it.
     m_body->SetMass(MASS);
-    m_body->SetInverseMass(MASS);
 
     tensor.SetBlockInertiaTensor(v3df(HALF_WIDTH, HALF_HEIGHT, HALF_LENGTH), MASS);
     m_body->SetInertiaTensor(tensor);
@@ -115,8 +113,7 @@ Car::Car()
 
 void Car::Reset(float x, float z, float heading, float speed, float s)
 {
-    // SetRotation also overwrites the orientation's i/j/k, so call it first and set the orientation afterwards.
-    m_body->SetRotation(0.0f, 0.0f, 0.0f);
+    m_body->SetRotation(0.0f, 0.0f, 0.0f);      // no spin
     m_body->SetOrientation(cosf(heading * 0.5f), 0.0f, sinf(heading * 0.5f), 0.0f);
     m_body->SetPosition(x, 0.0f, z);
     m_body->SetVelocity(sinf(heading) * speed, 0.0f, cosf(heading) * speed);
@@ -372,7 +369,7 @@ void Car::Step(const CarControls& controls)
 void Car::ApplyTyre(float offsetZ, float wheelAngle, float requestedForce, float friction, float load)
 {
     v3df offset, pointVelocity, wheelForward, wheelRight, force;
-    float velocityAlong, velocitySide, slip, maxForce, along, sideCapacity, side, stableLimit, torque;
+    float velocityAlong, velocitySide, slip, maxForce, along, sideCapacity, side, stableLimit;
 
     // Contact point relative to the centre of mass, and its velocity: v + w x r (w is about the Y axis).
     offset = m_forward * offsetZ;
@@ -407,12 +404,8 @@ void Car::ApplyTyre(float offsetZ, float wheelAngle, float requestedForce, float
 
     force = wheelForward * along + wheelRight * side;
 
-    // Force at the centre of mass, plus the torque it makes around the Y axis: (r x F).y = r.z * F.x - r.x * F.z
-    // (The module's AddForceAtPoint is not used: it adds the torque term to the force.)
-    torque = offset.z * force.x - offset.x * force.z;
-
-    m_body->AddForce(force);
-    m_body->AddTorque(v3df(0.0f, torque, 0.0f));
+    // Applied at the contact point: the body gets the force plus the yaw torque r x F it makes about the centre of mass.
+    m_body->AddForceAtPoint(force, m_body->GetPosition() + offset);
 }
 
 // Finds where the car is on the road and keeps it between the walls.
