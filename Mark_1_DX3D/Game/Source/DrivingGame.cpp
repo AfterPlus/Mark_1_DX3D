@@ -27,10 +27,6 @@ static const char* GROUND_TEXTURE_FILE = "Resources/Textures/T_GroundGrass.tga";
 static const int ROAD_MAX_VERTICES = MESH_SEGMENTS * 6;
 static const int GROUND_MAX_VERTICES = MESH_SEGMENTS * 6 * GROUND_LATERAL_CELLS * 2;
 
-// Roadside posts: give a sense of speed.
-static const float POST_SPACING = 18.0f;
-static const float POST_OFFSET = ROAD_HALF_WIDTH + 1.2f;
-
 // Grass is placed from a little behind the camera to this far ahead of the car (re-placed with the road meshes).
 // The ground mesh reaches ~375 m ahead, so the grass stops just short of its end (and fades out before, see Foliage.cpp).
 static const float GRASS_BEHIND = 25.0f;
@@ -200,6 +196,7 @@ bool DrivingGame::Initialize(RendererClass* renderer, HWND hwnd)
     point = m_Road.GetPoint(0.0f);
     m_Car.Reset(point.x, point.z, point.heading);
     m_Road.Update(0.0f);
+    m_Fence.Reset();
 
     m_cameraYaw = point.heading;
 
@@ -291,9 +288,13 @@ bool DrivingGame::Update(float dt, InputClass* input)
 
     m_Car.Update(dt, controls, m_Road);
 
-    // Drift score: the slide angle of the car, its speed, and whether it hit a wall.
+    // Fence posts the car runs into break off and fly (they collide with the car as it is drawn).
+    bool postHit = m_Fence.Update(dt, m_Car, m_Road, GetCarDrawScale() * CAR_HALF_WIDTH, GetCarDrawScale() * CAR_HALF_LENGTH,
+                                  GetCarDrawScale() * 2.0f * CAR_HALF_HEIGHT, GetCarHeight(), m_meshStart);
+
+    // Drift score: the slide angle of the car, its speed, and whether it hit a wall or a post.
     m_Score.Update(dt, m_Car.GetSlipAngle(), m_Car.GetSpeed(), !m_Car.IsOffRoad());
-    if(m_Car.ConsumeWallHit())
+    if(m_Car.ConsumeWallHit() || postHit)
     {
         m_Score.Crash();
     }
@@ -549,6 +550,12 @@ float DrivingGame::GroundMeshHeight(float s, float lateral) const
     return h0 + (h3 - h0) * a + (h2 - h3) * b;      // triangle p0 p2 p3
 }
 
+// How much bigger the car is drawn than its CAR_HALF_* box (the exported model is that box at scale 1).
+float DrivingGame::GetCarDrawScale() const
+{
+    return m_carIsAsset ? CAR_MODEL_SCALE : 1.0f;
+}
+
 // Height of the road under the car (the road is level across its width).
 float DrivingGame::GetCarHeight() const
 {
@@ -562,8 +569,7 @@ void DrivingGame::BuildDrawList(float meshStart)
     RoadPoint point;
     XMFLOAT3 position;
     XMMATRIX world, tilt;
-    float s, firstPost, carY, grade, relative, pitch, roll;
-    int side;
+    float carY, grade, relative, pitch, roll;
 
     m_Items.clear();
 
@@ -608,26 +614,8 @@ void DrivingGame::BuildDrawList(float meshStart)
     m_Items.push_back(item);
     item.castsShadow = true;
 
-    // Posts on both sides, at fixed distances along the road.
-    firstPost = ceilf(meshStart / POST_SPACING) * POST_SPACING;
-
-    for(s=firstPost; s<meshStart + MESH_LENGTH; s+=POST_SPACING)
-    {
-        point = m_Road.GetPoint(s);
-
-        for(side=-1; side<=1; side+=2)
-        {
-            position = OffsetFromRoad(point, (float)side * POST_OFFSET, m_Road.GetSurfaceHeight(s, (float)side * POST_OFFSET) + 0.7f);
-
-            world = XMMatrixScaling(0.15f, 0.7f, 0.15f) *
-                    XMMatrixRotationY(point.heading) *
-                    XMMatrixTranslation(position.x, position.y, position.z);
-
-            item.model = m_PostModel;
-            XMStoreFloat4x4(&item.world, world);
-            m_Items.push_back(item);
-        }
-    }
+    // Fence posts: the standing ones and the ones knocked loose.
+    m_Fence.AddDrawItems(m_Items, m_PostModel, m_Road, meshStart, meshStart + MESH_LENGTH);
 }
 
 void DrivingGame::UpdateCamera(float dt)

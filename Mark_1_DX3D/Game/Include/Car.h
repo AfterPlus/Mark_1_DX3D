@@ -46,6 +46,13 @@ public:
     int GetGear() const { return m_gear; }                      // 1..6
     float GetLongitudinalAccel() const { return m_longAccel; }  // m/s^2 along the nose, smoothed (+ = accelerating)
 
+    // Contact with loose objects (the fence posts). Everything is in world space; only the horizontal part of an impulse
+    // moves the car, the ground takes the rest.
+    XMFLOAT3 GetVelocity() const;
+    float GetYawRate() const;                                               // rad/s about +Y
+    float GetInverseMassAt(const XMFLOAT3& point, const XMFLOAT3& direction) const;  // 1 / effective mass for a push along direction at point
+    void ApplyImpulse(const XMFLOAT3& impulse, const XMFLOAT3& point);
+
     // True once after the car bounced off a wall (the game uses it to end a drift chain).
     bool ConsumeWallHit() { bool hit = m_wallHit; m_wallHit = false; return hit; }
 

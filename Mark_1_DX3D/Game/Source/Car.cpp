@@ -149,6 +149,46 @@ XMFLOAT3 Car::GetPosition() const
     return XMFLOAT3(position.x, 0.0f, position.z);
 }
 
+XMFLOAT3 Car::GetVelocity() const
+{
+    v3df velocity = m_body->GetVelocity();
+
+    return XMFLOAT3(velocity.x, 0.0f, velocity.z);
+}
+
+float Car::GetYawRate() const
+{
+    return m_body->GetRotation().y;
+}
+
+// Effective inverse mass of the car for an impulse along `direction` at `point`: 1/m + ((r x n).y)^2 / I_yy.
+// The car only moves on the ground plane and only turns about Y, so just the horizontal part counts.
+float Car::GetInverseMassAt(const XMFLOAT3& point, const XMFLOAT3& direction) const
+{
+    v3df position = m_body->GetPosition();
+    v3df r(point.x - position.x, 0.0f, point.z - position.z);
+    v3df n(direction.x, 0.0f, direction.z);
+    float torque = (r % n).y;
+
+    return m_body->GetInverseMass() + torque * torque * m_body->GetInverseInertiaTensorWorld().Transform(v3df(0.0f, 1.0f, 0.0f)).y;
+}
+
+// An instant change of momentum at a point: speed changes by J/m, the yaw rate by (r x J).y / I_yy.
+void Car::ApplyImpulse(const XMFLOAT3& impulse, const XMFLOAT3& point)
+{
+    v3df position = m_body->GetPosition();
+    v3df r(point.x - position.x, 0.0f, point.z - position.z);
+    v3df j(impulse.x, 0.0f, impulse.z);
+    v3df velocity = m_body->GetVelocity();
+    v3df rotation = m_body->GetRotation();
+
+    velocity.AddScaledVector(j, m_body->GetInverseMass());
+    rotation.y += m_body->GetInverseInertiaTensorWorld().Transform(r % j).y;
+
+    m_body->SetVelocity(velocity);
+    m_body->SetRotation(rotation);
+}
+
 void Car::Update(float dt, const CarControls& controls, const Road& road)
 {
     RoadPoint point;

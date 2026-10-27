@@ -8,6 +8,7 @@
 #include "Road.h"
 #include "DriftScore.h"
 #include "Foliage.h"
+#include "Fence.h"
 
 // Drift Horizon: an endless winding road, a car that steers across it and slides in the bends.
 class DrivingGame : public Game
@@ -32,6 +33,7 @@ private:
     void UpdateCamera(float dt);
     void UpdateLight();
     float GetCarHeight() const;
+    float GetCarDrawScale() const;
 
 private:
     RendererClass* m_Renderer;          // not owned
@@ -46,6 +48,7 @@ private:
     Car m_Car;
     DriftScore m_Score;
     Foliage m_Foliage;
+    Fence m_Fence;
 
     std::vector<RenderItem> m_Items;
     std::vector<ModelClass::MeshVertex> m_RoadVertices;
