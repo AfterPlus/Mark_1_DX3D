@@ -7,5 +7,16 @@
 # Whitelist .cpp and .h files
 !*.cpp
 !*.h
+
+# Whitelist HLSL shaders (and shared includes)
+!*.hlsl
+!*.HLSL
+!*.hlsli
+!*.HLSLI
 /.claude
 *.tlog
+
+# Whitelist docs and README screenshots
+!README.md
+!docs/
+!docs/**
