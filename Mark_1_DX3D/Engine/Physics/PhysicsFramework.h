@@ -7,11 +7,11 @@
 // Everything lives in namespace Physics and depends only on the C++ standard
 // library and DirectXMath - no other part of the engine is needed.
 //
-// Add to the project (all paths relative to Mark_1_DX3D\Physics):
+// Add to the project (all paths relative to Mark_1_DX3D\Engine\Physics):
 //   ParticleModel.cpp  Particle.cpp  RigidBody.cpp
 //   Collisions\CollisionDetector.cpp  Collisions\Contact.cpp
 //   Collisions\ContactResolver.cpp    Collisions\IntersectionTests.cpp
-// and include this header:  #include "../Physics/PhysicsFramework.h"
+// and include this header:  #include "Physics/PhysicsFramework.h"
 //
 // Typical rigid body use:
 //   auto transform = std::make_shared<Physics::Transform>();

@@ -18,6 +18,10 @@ Hud::Hud()
     m_FpsString = nullptr;
     m_TextString1 = nullptr;
     m_TextString2 = nullptr;
+    m_TextString3 = nullptr;
+    strcpy_s(m_messageText[0], "Hello");
+    strcpy_s(m_messageText[1], "Goodbye");
+    strcpy_s(m_messageText[2], " ");
     m_MouseStrings = nullptr;
     m_previousFps = -1;
     m_mouseWasDown = false;
@@ -139,6 +143,16 @@ bool Hud::Initialize(D3dClass* direct3D, int screenWidth, int screenHeight, HWND
         return false;
     }
 
+    // Create and initialize the third text object.
+    m_TextString3 = new TextClass;
+
+    result = m_TextString3->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext(), screenWidth, screenHeight, 32, m_Font, m_messageText[2], 100, 300, 1.0f, 1.0f, 1.0f);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the text object.", L"Error", MB_OK);
+        return false;
+    }
+
     // Group the text into the minimizable HUD widgets and place them.
     result = InitializeWidgets();
     if(!result)
@@ -155,6 +169,13 @@ void Hud::Shutdown()
 {
     // Widget buttons and titles.
     ShutdownWidgets();
+
+    if(m_TextString3)
+    {
+        m_TextString3->Shutdown();
+        delete m_TextString3;
+        m_TextString3 = nullptr;
+    }
 
     if(m_TextString2)
     {
@@ -261,6 +282,32 @@ bool Hud::Render()
     return result;
 }
 
+bool Hud::SetMessage(int index, const char* text)
+{
+    TextClass* line;
+    XMFLOAT4 color;
+    int textX, textY;
+
+    if(index < 0 || index > 2 || !m_widgetsInitialized)
+    {
+        return true;
+    }
+
+    // Nothing to rebuild when the text has not changed.
+    if(strcmp(m_messageText[index], text) == 0)
+    {
+        return true;
+    }
+
+    strcpy_s(m_messageText[index], text);
+
+    line = (index == 0) ? m_TextString1 : ((index == 1) ? m_TextString2 : m_TextString3);
+    color = line->GetPixelColor();
+    GetLinePosition(WIDGET_MESSAGES, index, textX, textY);
+
+    return line->UpdateText(m_Direct3D->GetDeviceContext(), m_Font, m_messageText[index], textX, textY, color.x, color.y, color.z);
+}
+
 bool Hud::OnResize(int screenWidth, int screenHeight)
 {
     int i;
@@ -289,6 +336,11 @@ bool Hud::OnResize(int screenWidth, int screenHeight)
     if(m_TextString2)
     {
         m_TextString2->SetScreenSize(screenWidth, screenHeight);
+    }
+
+    if(m_TextString3)
+    {
+        m_TextString3->SetScreenSize(screenWidth, screenHeight);
     }
 
     for(i=0; i<WIDGET_COUNT; i++)
@@ -444,7 +496,7 @@ static const char* GetButtonText(DockEdge edge, bool minimized)
 bool Hud::InitializeWidgets()
 {
     // The widest line each widget can show, used to size the widget so it does not change width as the numbers change.
-    static const char* widestLines[WIDGET_COUNT] = { "Fps: 99999", "Mouse Button: Yes", "Goodbye" };
+    static const char* widestLines[WIDGET_COUNT] = { "Fps: 99999", "Mouse Button: Yes", "Speed 999 km/h  G6" };
     HudWidget* widget;
     char text[32];
     int i, lineWidth, headerWidth;
@@ -470,12 +522,13 @@ bool Hud::InitializeWidgets()
 
     // Greetings on the bottom edge.
     widget = &m_Widgets[WIDGET_MESSAGES];
-    widget->titleText = "Messages";
+    widget->titleText = "Drive";
     widget->edge = DOCK_BOTTOM;
     widget->anchor = WIDGET_MARGIN;
-    widget->lineCount = 2;
+    widget->lineCount = 3;
     widget->lines[0] = m_TextString1;
     widget->lines[1] = m_TextString2;
+    widget->lines[2] = m_TextString3;
 
     for(i=0; i<WIDGET_COUNT; i++)
     {
@@ -600,7 +653,8 @@ bool Hud::LayoutWidgets()
                 panelX = widget->anchor;
                 panelY = m_screenHeight - WIDGET_MARGIN - expandedHeight;
                 widget->buttonX = panelX;
-                widget->buttonY = m_screenHeight - edgeInset - WIDGET_HEADER_HEIGHT;
+                // Expanded: the header is the top row of the panel (the lines hang below it). Minimized: just the button, flush with the edge.
+                widget->buttonY = widget->minimized ? (m_screenHeight - WIDGET_HEADER_HEIGHT) : panelY;
                 titleX = widget->buttonX + widget->buttonWidth + WIDGET_TITLE_GAP;
                 break;
             }
@@ -626,25 +680,20 @@ bool Hud::LayoutWidgets()
     }
 
     // The mouse and render count strings are rebuilt every frame and the fps string is rebuilt once the previous fps is reset,
-    // but the static greeting strings have to be rebuilt here.
-    strcpy_s(text, "Hello");
-    GetLinePosition(WIDGET_MESSAGES, 0, textX, textY);
-    color = m_TextString1->GetPixelColor();
-
-    result = m_TextString1->UpdateText(deviceContext, m_Font, text, textX, textY, color.x, color.y, color.z);
-    if(!result)
+    // but the message lines only change when their text does, so they have to be rebuilt here.
+    for(i=0; i<3; i++)
     {
-        return false;
-    }
+        TextClass* line = (i == 0) ? m_TextString1 : ((i == 1) ? m_TextString2 : m_TextString3);
 
-    strcpy_s(text, "Goodbye");
-    GetLinePosition(WIDGET_MESSAGES, 1, textX, textY);
-    color = m_TextString2->GetPixelColor();
+        strcpy_s(text, m_messageText[i]);
+        GetLinePosition(WIDGET_MESSAGES, i, textX, textY);
+        color = line->GetPixelColor();
 
-    result = m_TextString2->UpdateText(deviceContext, m_Font, text, textX, textY, color.x, color.y, color.z);
-    if(!result)
-    {
-        return false;
+        result = line->UpdateText(deviceContext, m_Font, text, textX, textY, color.x, color.y, color.z);
+        if(!result)
+        {
+            return false;
+        }
     }
 
     // Force the fps string to be rebuilt at its new position on the next frame.

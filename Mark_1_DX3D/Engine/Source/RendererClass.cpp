@@ -1,8 +1,10 @@
 #include "RendererClass.h"
+#include <algorithm>
 
 RendererClass::RendererClass()
 {
     m_Direct3D = nullptr;
+    m_Assets = nullptr;
     m_ProjectionLight = nullptr;
     m_ViewPoint = nullptr;
     m_RenderTexture = nullptr;
@@ -10,7 +12,15 @@ RendererClass::RendererClass()
     m_DepthShader = nullptr;
     m_ShadowShader = nullptr;
     m_SoftShadowShader = nullptr;
+    m_FoliageShader = nullptr;
+    m_Skybox = nullptr;
+    m_foliageUploaded = nullptr;
+    m_foliageUploadedSize = 0;
     m_shadowMapBias = 0.0f;
+    m_shadowBiasMeters = 0.0f;
+    m_lightNear = 0.0f;
+    m_lightFar = 0.0f;
+    m_lightDistance = 0.0f;
 }
 
 RendererClass::~RendererClass()
@@ -31,12 +41,25 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
+    // Shared model / palette loader.
+    m_Assets = new AssetManager;
+
+    result = m_Assets->Initialize(m_Direct3D->GetDevice(), m_Direct3D->GetDeviceContext());
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not load Resources/Textures/palette.tga (run Tools/make_palette.py).", L"Error", MB_OK);
+        return false;
+    }
+
     // The view point the shadow map is rendered from.
     m_ViewPoint = new ViewPointClass;
 
     m_ViewPoint->SetPosition(0.0f, 8.0f, -5.0f);
     m_ViewPoint->SetLookAt(0.0f, 0.0f, 0.0f);
     m_ViewPoint->SetProjectionParameters((XM_PI / 2.0f), 1.0f, 3.0f, 100.0f);
+    m_lightNear = 3.0f;
+    m_lightFar = 100.0f;
+    m_lightDistance = sqrtf(8.0f * 8.0f + 5.0f * 5.0f);
     m_ViewPoint->GenerateViewMatrix();
     m_ViewPoint->GenerateProjectionMatrix();
 
@@ -94,14 +117,39 @@ bool RendererClass::Initialize(int screenWidth, int screenHeight, HWND hwnd)
         return false;
     }
 
-    // Fixes shadow acne.
-    m_shadowMapBias = 0.005f;
+    m_FoliageShader = new FoliageShaderClass;
+
+    result = m_FoliageShader->Initialize(m_Direct3D->GetDevice(), hwnd);
+    if(!result)
+    {
+        MessageBox(hwnd, L"Could not initialize the foliage shader object.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Fixes shadow acne. Kept in metres: small enough that the gap under the car still shadows,
+    // large enough to cover a shadow-map texel's depth slope on the ground.
+    m_shadowBiasMeters = 0.1f;
+    UpdateShadowBias();
 
     return true;
 }
 
 void RendererClass::Shutdown()
 {
+    if(m_Skybox)
+    {
+        m_Skybox->Shutdown();
+        delete m_Skybox;
+        m_Skybox = nullptr;
+    }
+
+    if(m_FoliageShader)
+    {
+        m_FoliageShader->Shutdown();
+        delete m_FoliageShader;
+        m_FoliageShader = nullptr;
+    }
+
     if(m_SoftShadowShader)
     {
         m_SoftShadowShader->Shutdown();
@@ -149,6 +197,13 @@ void RendererClass::Shutdown()
         m_ViewPoint = nullptr;
     }
 
+    if(m_Assets)
+    {
+        m_Assets->Shutdown();
+        delete m_Assets;
+        m_Assets = nullptr;
+    }
+
     // D3D last: everything above was created from its device.
     if(m_Direct3D)
     {
@@ -175,10 +230,60 @@ void RendererClass::SetLight(XMFLOAT3 position, XMFLOAT3 lookAt)
     m_ViewPoint->GenerateViewMatrix();
 
     m_ProjectionLight->SetPosition(position.x, position.y, position.z);
+
+    m_lightDistance = sqrtf((lookAt.x - position.x) * (lookAt.x - position.x) +
+                            (lookAt.y - position.y) * (lookAt.y - position.y) +
+                            (lookAt.z - position.z) * (lookAt.z - position.z));
+    UpdateShadowBias();
+}
+
+void RendererClass::SetLightProjection(float fieldOfView, float nearPlane, float farPlane)
+{
+    m_ViewPoint->SetProjectionParameters(fieldOfView, 1.0f, nearPlane, farPlane);
+    m_ViewPoint->GenerateProjectionMatrix();
+
+    m_lightNear = nearPlane;
+    m_lightFar = farPlane;
+    UpdateShadowBias();
+}
+
+// The shadow test compares perspective depth (z/w), which is not linear: one metre at distance d
+// changes it by near*far / ((far-near) * d^2). Convert the metre bias at the look-at distance, so the
+// same bias works whether the light is 10 m or 100 m away.
+void RendererClass::UpdateShadowBias()
+{
+    if(m_lightDistance <= 0.0f || m_lightFar <= m_lightNear)
+    {
+        return;
+    }
+
+    m_shadowMapBias = m_shadowBiasMeters * (m_lightNear * m_lightFar) / ((m_lightFar - m_lightNear) * m_lightDistance * m_lightDistance);
 }
 
 // Old Application::Render (the 3D half).
-bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderItem>& items)
+bool RendererClass::LoadSkybox(const char* folder)
+{
+    if(m_Skybox)
+    {
+        m_Skybox->Shutdown();
+        delete m_Skybox;
+        m_Skybox = nullptr;
+    }
+
+    m_Skybox = new SkyboxClass;
+
+    if(!m_Skybox->Initialize(m_Direct3D->GetDevice(), NULL, folder))
+    {
+        m_Skybox->Shutdown();
+        delete m_Skybox;
+        m_Skybox = nullptr;
+        return false;
+    }
+
+    return true;
+}
+
+bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderItem>& items, FoliageScene* foliage)
 {
     XMMATRIX worldMatrix, viewMatrix, projectionMatrix;
     XMFLOAT4 lightPosition;
@@ -227,6 +332,156 @@ bool RendererClass::RenderScene(CameraClass* camera, const std::vector<RenderIte
         }
     }
 
+    // Pass 4: foliage on top of the lit scene (it uses the depth buffer the scene just wrote).
+    if(foliage && !foliage->chunks.empty())
+    {
+        result = RenderFoliage(camera, *foliage);
+        if(!result)
+        {
+            return false;
+        }
+    }
+
+    // Pass 5: the sky, last, so it only fills the pixels nothing else covered.
+    if(m_Skybox)
+    {
+        result = m_Skybox->Render(m_Direct3D->GetDeviceContext(), viewMatrix, projectionMatrix);
+        if(!result)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// The instances live on the GPU; only new ones are uploaded (FoliageScene::changed). Each frame every chunk is
+// checked against the view frustum (cut off at the fade distance), and of the visible ones only the share its distance
+// keeps is drawn: chunks are sorted by LOD rank, so that share is the start of the chunk's range.
+bool RendererClass::RenderFoliage(CameraClass* camera, FoliageScene& foliage)
+{
+    ID3D11DeviceContext* context = m_Direct3D->GetDeviceContext();
+    XMMATRIX viewMatrix, projectionMatrix;
+    XMFLOAT4 lightPosition;
+    XMFLOAT3 cameraPosition;
+    FoliageDraw draw;
+    float dx, dz, distance, keep;
+    size_t i;
+    int currentModel;
+    bool result;
+
+    if(m_foliageUploaded != &foliage || m_foliageUploadedSize != foliage.instances.size())
+    {
+        result = m_FoliageShader->SetInstances(m_Direct3D->GetDevice(), context, foliage.instances.data(), (int)foliage.instances.size());
+        if(!result)
+        {
+            return false;
+        }
+
+        m_foliageUploaded = &foliage;
+        m_foliageUploadedSize = foliage.instances.size();
+    }
+    else
+    {
+        for(i=0; i<foliage.changed.size(); i++)
+        {
+            m_FoliageShader->UpdateInstances(context, foliage.instances.data(), foliage.changed[i].first, foliage.changed[i].count);
+        }
+    }
+
+    foliage.changed.clear();
+
+    camera->GetViewMatrix(viewMatrix);
+    m_Direct3D->GetProjectionMatrix(projectionMatrix);
+    cameraPosition = camera->GetPosition();
+
+    // Nothing is drawn past the fade distance, so that is the far plane for the test.
+    m_foliageFrustum.ConstructFrustum(viewMatrix, projectionMatrix, foliage.wind.fadeEnd);
+
+    m_foliageDraws.clear();
+
+    for(i=0; i<foliage.chunks.size(); i++)
+    {
+        const FoliageChunk& chunk = foliage.chunks[i];
+
+        if(chunk.count <= 0 || chunk.model < 0 || chunk.model >= (int)foliage.models.size() || !foliage.models[chunk.model].model)
+        {
+            continue;
+        }
+
+        if(!m_foliageFrustum.CheckSphere(chunk.center.x, chunk.center.y, chunk.center.z, chunk.radius))
+        {
+            continue;
+        }
+
+        // The nearest the chunk gets to the camera (on the ground plane, like the shader) keeps the most instances.
+        dx = chunk.center.x - cameraPosition.x;
+        dz = chunk.center.z - cameraPosition.z;
+        distance = sqrtf(dx * dx + dz * dz) - chunk.radius;
+        if(distance < 0.0f)
+        {
+            distance = 0.0f;
+        }
+
+        keep = FoliageKeepShare(distance, foliage.models[chunk.model].lodDistance, foliage.models[chunk.model].lodMinKeep);
+
+        draw.model = chunk.model;
+        draw.first = chunk.first;
+        draw.count = (int)ceilf((float)chunk.count * keep);
+        draw.distance = distance;
+
+        if(draw.count > chunk.count)
+        {
+            draw.count = chunk.count;
+        }
+
+        m_foliageDraws.push_back(draw);
+    }
+
+    if(m_foliageDraws.empty())
+    {
+        return true;
+    }
+
+    // Grouped by model (one mesh bind each), near to far inside a model so the depth test rejects more hidden blades.
+    std::sort(m_foliageDraws.begin(), m_foliageDraws.end(), [](const FoliageDraw& a, const FoliageDraw& b)
+    {
+        return a.model != b.model ? a.model < b.model : a.distance < b.distance;
+    });
+
+    lightPosition = m_ProjectionLight->GetPosition();
+
+    result = m_FoliageShader->Begin(context, viewMatrix, projectionMatrix, cameraPosition,
+                                    XMFLOAT3(lightPosition.x, lightPosition.y, lightPosition.z),
+                                    m_ProjectionLight->GetAmbientColor(), m_ProjectionLight->GetDiffuseColor(),
+                                    foliage.wind, m_BlackWhiteRenderTexture->GetShaderResourceView());
+    if(!result)
+    {
+        return false;
+    }
+
+    currentModel = -1;
+
+    for(i=0; i<m_foliageDraws.size(); i++)
+    {
+        if(m_foliageDraws[i].model != currentModel)
+        {
+            currentModel = m_foliageDraws[i].model;
+
+            result = m_FoliageShader->SetModel(context, foliage.models[currentModel].model, foliage.models[currentModel].lodDistance,
+                                               foliage.models[currentModel].lodMinKeep);
+            if(!result)
+            {
+                m_FoliageShader->End(context);
+                return false;
+            }
+        }
+
+        m_FoliageShader->Draw(context, m_foliageDraws[i].first, m_foliageDraws[i].count);
+    }
+
+    m_FoliageShader->End(context);
+
     return true;
 }
 
@@ -250,6 +505,11 @@ bool RendererClass::RenderDepthToTexture(const std::vector<RenderItem>& items)
 
     for(i=0; i<items.size(); i++)
     {
+        if(!items[i].castsShadow)
+        {
+            continue;
+        }
+
         worldMatrix = XMLoadFloat4x4(&items[i].world);
 
         items[i].model->Render(m_Direct3D->GetDeviceContext());

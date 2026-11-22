@@ -193,12 +193,10 @@ v3df RigidBody::GetDirectionInLocalSpace( const v3df& point ) const
 #pragma endregion
 
 #pragma region Rotation
+// The rotation is the angular velocity (rad/s); the orientation is set separately with SetOrientation.
 void RigidBody::SetRotation( const v3df& rotation )
 {
 	_rotation = rotation;
-	_orientation.i = rotation.x;
-	_orientation.j = rotation.y;
-	_orientation.k = rotation.z;
 }
 
 void RigidBody::SetRotation( const float x, const float y, const float z )
@@ -206,9 +204,6 @@ void RigidBody::SetRotation( const float x, const float y, const float z )
 	_rotation.x = x;
 	_rotation.y = y;
 	_rotation.z = z;
-	_orientation.i = x;
-	_orientation.j = y;
-	_orientation.k = z;
 }
 
 void RigidBody::AddRotation( const v3df& deltaRotation )
@@ -261,12 +256,12 @@ void RigidBody::AddForce( const v3df& force )
 	_isActive = true;
 }
 
+// point is in world space: the force goes to the centre of mass, and (point - centre of mass) x force to the torque.
 void RigidBody::AddForceAtPoint( const v3df& force, const v3df& point )
 {
-	v3df pt = point;
-	v3df newForce = _netForce + force;
-	newForce += pt % force;
-	_netForce = newForce;
+	v3df pt = point - _position;
+	_netForce += force;
+	_torque += pt % force;
 	_isActive = true;
 }
 

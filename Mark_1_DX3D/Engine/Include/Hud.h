@@ -58,6 +58,9 @@ public:
     bool Render();                   // the whole 2D pass
     bool OnResize(int screenWidth, int screenHeight);
 
+    // Sets one of the three lines of the info widget (0..2). Cheap to call every frame: nothing is rebuilt unless the text changed.
+    bool SetMessage(int index, const char* text);
+
 private:
     bool UpdateFps();
     bool UpdateMouseStrings(int, int, bool);
@@ -80,6 +83,8 @@ private:
     TextClass* m_FpsString;
     TextClass* m_TextString1;
     TextClass* m_TextString2;
+    TextClass* m_TextString3;
+    char m_messageText[3][32];
     TextClass* m_MouseStrings;
 
     HudWidget m_Widgets[WIDGET_COUNT];

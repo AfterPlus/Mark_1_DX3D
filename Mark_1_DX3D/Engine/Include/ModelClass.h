@@ -5,6 +5,8 @@
 #include <d3d11.h>
 #include <directxmath.h>
 #include <fstream>
+#include <string>
+#include <unordered_map>
 using namespace std;
 #include "TextureClass.h"
 using namespace DirectX;
@@ -44,10 +46,22 @@ private:
     };
 
 public:
+    // A vertex as game code writes it (position, uv, normal). Tangent/binormal are computed for you.
+    struct MeshVertex
+    {
+        float x, y, z;
+        float tu, tv;
+        float nx, ny, nz;
+    };
+
     ModelClass();
     ~ModelClass();
 
     bool Initialize(ID3D11Device*, ID3D11DeviceContext*, char*, char*, char*, char* = nullptr);
+    bool InitializeDynamic(ID3D11Device*, ID3D11DeviceContext*, int maxVertices, char* textureFilename1, char* textureFilename2, char* textureFilename3 = nullptr);
+    bool UpdateMesh(ID3D11DeviceContext*, const MeshVertex*, int vertexCount);
+    // Loads the model file and draws it with a texture owned by someone else (the AssetManager's palette).
+    bool InitializeShared(ID3D11Device*, char* modelFilename, ID3D11ShaderResourceView* sharedTexture);
     void Shutdown();
     void Render(ID3D11DeviceContext*);
 
@@ -72,6 +86,10 @@ private:
     int m_vertexCount, m_indexCount;
     TextureClass* m_Textures;
     ModelType* m_model;
+    bool m_dynamic;
+    ID3D11ShaderResourceView* m_sharedTexture;
+    int m_maxVertices;
+    bool m_weld;            // share identical corners (position, uv, normal) through the index buffer; static models only
 
 };
 

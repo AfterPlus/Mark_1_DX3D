@@ -4,8 +4,14 @@ ModelClass::ModelClass()
 {
     m_vertexBuffer = nullptr;
     m_indexBuffer = nullptr;
-	m_Textures = nullptr;
-	m_model = nullptr;
+    m_Textures = nullptr;
+    m_model = nullptr;
+    m_vertexCount = 0;
+    m_weld = false;
+    m_indexCount = 0;
+    m_dynamic = false;
+    m_maxVertices = 0;
+    m_sharedTexture = nullptr;
 }
 
 ModelClass::~ModelClass()
@@ -40,6 +46,106 @@ bool ModelClass::Initialize(ID3D11Device* device, ID3D11DeviceContext* deviceCon
 	return true;
 }
 
+bool ModelClass::InitializeDynamic(ID3D11Device* device, ID3D11DeviceContext* deviceContext, int maxVertices, char* textureFilename1, char* textureFilename2, char* textureFilename3)
+{
+	bool result;
+
+	m_dynamic = true;
+	m_maxVertices = maxVertices;
+
+	// InitializeBuffers sizes both buffers from these counts, so set them to the maximum first.
+	m_vertexCount = maxVertices;
+	m_indexCount = maxVertices;
+
+	m_model = new ModelType[maxVertices];
+	ZeroMemory(m_model, sizeof(ModelType) * maxVertices);
+
+	result = InitializeBuffers(device);
+	if(!result)
+	{
+		return false;
+	}
+
+	// Nothing to draw until the first UpdateMesh.
+	m_vertexCount = 0;
+	m_indexCount = 0;
+
+	return LoadTexture(device, deviceContext, textureFilename1, textureFilename2, textureFilename3);
+}
+
+bool ModelClass::UpdateMesh(ID3D11DeviceContext* deviceContext, const MeshVertex* vertices, int vertexCount)
+{
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	VertexType* dst;
+	HRESULT result;
+	int i;
+
+	// Only dynamic models, only whole triangles, never more than the buffer holds.
+	if(!m_dynamic || vertexCount > m_maxVertices || (vertexCount % 3) != 0)
+	{
+		return false;
+	}
+
+	// Copy into the CPU-side model array, then let the existing code compute tangents / binormals.
+	for(i=0; i<vertexCount; i++)
+	{
+		m_model[i].x  = vertices[i].x;   m_model[i].y  = vertices[i].y;   m_model[i].z  = vertices[i].z;
+		m_model[i].tu = vertices[i].tu;  m_model[i].tv = vertices[i].tv;
+		m_model[i].nx = vertices[i].nx;  m_model[i].ny = vertices[i].ny;  m_model[i].nz = vertices[i].nz;
+	}
+
+	m_vertexCount = vertexCount;
+	m_indexCount = vertexCount;
+
+	CalculateModelVectors();
+
+	// WRITE_DISCARD: "I will overwrite the whole buffer" - the GPU keeps using the old contents for frames in flight.
+	result = deviceContext->Map(m_vertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+	if(FAILED(result))
+	{
+		return false;
+	}
+
+	dst = (VertexType*)mapped.pData;
+
+	for(i=0; i<vertexCount; i++)
+	{
+		dst[i].position = XMFLOAT4(m_model[i].x, m_model[i].y, m_model[i].z, 1.0f);
+		dst[i].texture = XMFLOAT2(m_model[i].tu, m_model[i].tv);
+		dst[i].normal = XMFLOAT3(m_model[i].nx, m_model[i].ny, m_model[i].nz);
+		dst[i].tangent = XMFLOAT3(m_model[i].tx, m_model[i].ty, m_model[i].tz);
+		dst[i].binormal = XMFLOAT3(m_model[i].bx, m_model[i].by, m_model[i].bz);
+	}
+
+	deviceContext->Unmap(m_vertexBuffer, 0);
+
+	return true;
+}
+
+bool ModelClass::InitializeShared(ID3D11Device* device, char* modelFilename, ID3D11ShaderResourceView* sharedTexture)
+{
+	if(!LoadModel(modelFilename))
+	{
+		return false;
+	}
+
+	CalculateModelVectors();
+
+	// Model files list every triangle's corners separately; sharing the identical ones lets the GPU reuse a vertex
+	// it has just transformed (instanced foliage draws tens of thousands of these models a frame). The tangent /
+	// binormal of the first corner is kept; the shaders that draw these models do not use them.
+	m_weld = true;
+
+	if(!InitializeBuffers(device))
+	{
+		return false;
+	}
+
+	m_sharedTexture = sharedTexture;
+
+	return true;
+}
+
 void ModelClass::Shutdown()
 {
     // Shutdown the vertex and index buffers.
@@ -64,6 +170,11 @@ int ModelClass::GetIndexCount()
 
 ID3D11ShaderResourceView* ModelClass::GetTexture(int index)
 {
+	if(m_sharedTexture)
+	{
+		return m_sharedTexture;
+	}
+
 	return m_Textures[index].GetTexture();
 }
 
@@ -89,23 +200,42 @@ bool ModelClass::InitializeBuffers(ID3D11Device* device)
 		return false;
 	}
 
-	// Load the vertex array and index array with data.
+	// Load the vertex array and index array with data. Welded: each distinct corner once, the indices point at it.
+	std::unordered_map<std::string, unsigned long> corners;
+	int bufferVertices = 0;
+
 	for(int i=0; i<m_vertexCount; i++)
 	{
-		vertices[i].position = XMFLOAT4(m_model[i].x, m_model[i].y, m_model[i].z, 1.0f);
-		vertices[i].texture = XMFLOAT2(m_model[i].tu, m_model[i].tv);
-		vertices[i].normal = XMFLOAT3(m_model[i].nx, m_model[i].ny, m_model[i].nz);
-		vertices[i].tangent = XMFLOAT3(m_model[i].tx, m_model[i].ty, m_model[i].tz);
-		vertices[i].binormal = XMFLOAT3(m_model[i].bx, m_model[i].by, m_model[i].bz);
+		if(m_weld && !m_dynamic)
+		{
+			const float key[8] = { m_model[i].x, m_model[i].y, m_model[i].z, m_model[i].tu, m_model[i].tv, m_model[i].nx, m_model[i].ny, m_model[i].nz };
+			std::string keyBytes((const char*)key, sizeof(key));
+			std::unordered_map<std::string, unsigned long>::iterator found = corners.find(keyBytes);
 
-		indices[i] = i;
+			if(found != corners.end())
+			{
+				indices[i] = found->second;
+				continue;
+			}
+
+			corners[keyBytes] = (unsigned long)bufferVertices;
+		}
+
+		vertices[bufferVertices].position = XMFLOAT4(m_model[i].x, m_model[i].y, m_model[i].z, 1.0f);
+		vertices[bufferVertices].texture = XMFLOAT2(m_model[i].tu, m_model[i].tv);
+		vertices[bufferVertices].normal = XMFLOAT3(m_model[i].nx, m_model[i].ny, m_model[i].nz);
+		vertices[bufferVertices].tangent = XMFLOAT3(m_model[i].tx, m_model[i].ty, m_model[i].tz);
+		vertices[bufferVertices].binormal = XMFLOAT3(m_model[i].bx, m_model[i].by, m_model[i].bz);
+
+		indices[i] = (unsigned long)bufferVertices;
+		bufferVertices++;
 	}
 
 	// Set up the description of the static vertex buffer.
-	vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
-	vertexBufferDesc.ByteWidth = sizeof(VertexType) * m_vertexCount;
+	vertexBufferDesc.Usage = m_dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_DEFAULT;
+	vertexBufferDesc.ByteWidth = sizeof(VertexType) * bufferVertices;
 	vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-	vertexBufferDesc.CPUAccessFlags = 0;
+	vertexBufferDesc.CPUAccessFlags = m_dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
 	vertexBufferDesc.MiscFlags = 0;
 	vertexBufferDesc.StructureByteStride = 0;
 
